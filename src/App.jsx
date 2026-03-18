@@ -37,26 +37,30 @@ function Grid() {
 
 // ─── Canvas building object ──────────────────────────────────────────────────
 
-function BuildingObject({ obj, isSelected, canDrag, onPointerDown, onDragMove, onDragEnd }) {
+function BuildingObject({ obj, isSelected, canDrag, onPointerDown, onDragStart, onDragMove, onDragEnd }) {
   const def   = BUILDING_DEFS[obj.type]
   const pw    = def.w * CELL_SIZE
   const ph    = def.h * CELL_SIZE
   const color = def.color
+  const hw    = pw / 2
+  const hh    = ph / 2
 
   return (
     <Group
       x={obj.x}
       y={obj.y}
+      rotation={obj.rotation}
       draggable={canDrag}
       onMouseDown={onPointerDown}
+      onDragStart={onDragStart}
       onDragMove={onDragMove}
       onDragEnd={onDragEnd}
     >
-      {/* Selection glow */}
+      {/* Selection glow — centered on group origin */}
       {isSelected && (
         <Rect
-          x={-3}
-          y={-3}
+          x={-hw - 3}
+          y={-hh - 3}
           width={pw + 6}
           height={ph + 6}
           cornerRadius={4}
@@ -70,6 +74,8 @@ function BuildingObject({ obj, isSelected, canDrag, onPointerDown, onDragMove, o
 
       {/* Building body */}
       <Rect
+        x={-hw}
+        y={-hh}
         width={pw}
         height={ph}
         fill={`${color}18`}
@@ -80,6 +86,8 @@ function BuildingObject({ obj, isSelected, canDrag, onPointerDown, onDragMove, o
 
       {/* Label */}
       <Text
+        x={-hw}
+        y={-hh}
         text={def.label}
         width={pw}
         height={ph}
@@ -133,10 +141,12 @@ function ZoomControls({ onZoom, onReset }) {
 // ─── App ─────────────────────────────────────────────────────────────────────
 
 export default function App() {
-  const stageRef   = useRef(null)
-  const midPanRef  = useRef(null)
-  const viewportRef = useRef(null)
-  const [tool, setTool] = useState('pan')
+  const stageRef        = useRef(null)
+  const midPanRef       = useRef(null)
+  const viewportRef     = useRef(null)
+  const draggingObjRef  = useRef(null)
+  const lastRotateRef   = useRef(0)
+  const [tool, setTool] = useState('pointer')
 
   const stageW = () => window.innerWidth  - PANEL_WIDTH
   const stageH = () => window.innerHeight - TOOLBAR_HEIGHT
@@ -165,13 +175,20 @@ export default function App() {
   // Keep viewportRef in sync for use in event handlers
   viewportRef.current = viewport
 
-  // Keyboard tool switch
+  // Keyboard tool switch + rotation
   useEffect(() => {
     const onKey = (e) => {
       if (e.target.tagName === 'INPUT') return
       if (e.key === 'h' || e.key === 'H') setTool('pan')
       if (e.key === 'v' || e.key === 'V') setTool('pointer')
       if (e.key === 'Escape') setSelectedObjId(null)
+      if ((e.key === 'r' || e.key === 'R') && draggingObjRef.current !== null) {
+        setObjects(prev => prev.map(o =>
+          o.id === draggingObjRef.current
+            ? { ...o, rotation: (o.rotation + 90) % 360 }
+            : o
+        ))
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -223,8 +240,20 @@ export default function App() {
 
   const handleWheel = useCallback((e) => {
     e.evt.preventDefault()
-    const pointer = stageRef.current.getPointerPosition()
-    zoomAtPoint(pointer.x, pointer.y, e.evt.deltaY < 0 ? 1 : -1)
+    if (draggingObjRef.current !== null) {
+      const now = Date.now()
+      if (now - lastRotateRef.current < 250) return
+      lastRotateRef.current = now
+      const dir = e.evt.deltaY < 0 ? 90 : -90
+      setObjects(prev => prev.map(o =>
+        o.id === draggingObjRef.current
+          ? { ...o, rotation: ((o.rotation + dir) + 360) % 360 }
+          : o
+      ))
+    } else {
+      const pointer = stageRef.current.getPointerPosition()
+      zoomAtPoint(pointer.x, pointer.y, e.evt.deltaY < 0 ? 1 : -1)
+    }
   }, [zoomAtPoint])
 
   const handleZoomBtn = useCallback((dir) => {
@@ -240,15 +269,15 @@ export default function App() {
   const snap = (v) => Math.round(v / CELL_SIZE) * CELL_SIZE
 
   const addBuilding = useCallback((type) => {
-    const def = BUILDING_DEFS[type]
     const vpX = (dimensions.width  / 2 - viewport.x) / viewport.scale
     const vpY = (dimensions.height / 2 - viewport.y) / viewport.scale
     const obj = {
-      id:      _nextObjId++,
+      id:       _nextObjId++,
       type,
-      layerId: selectedId,
-      x:       snap(vpX - (def.w * CELL_SIZE) / 2),
-      y:       snap(vpY - (def.h * CELL_SIZE) / 2),
+      layerId:  selectedId,
+      rotation: 0,
+      x:        snap(vpX),
+      y:        snap(vpY),
     }
     setObjects(prev => [...prev, obj])
     setSelectedObjId(obj.id)
@@ -267,7 +296,12 @@ export default function App() {
     updateObjPos(id, x, y)
   }, [updateObjPos])
 
+  const handleObjDragStart = useCallback((e, id) => {
+    draggingObjRef.current = id
+  }, [])
+
   const handleObjDragEnd = useCallback((e, id) => {
+    draggingObjRef.current = null
     const node = e.target
     updateObjPos(id, snap(node.x()), snap(node.y()))
   }, [updateObjPos])
@@ -328,6 +362,7 @@ export default function App() {
                         setSelectedObjId(obj.id)
                       }
                     }}
+                    onDragStart={(e) => handleObjDragStart(e, obj.id)}
                     onDragMove={(e) => handleObjDragMove(e, obj.id)}
                     onDragEnd={(e) => handleObjDragEnd(e, obj.id)}
                   />
