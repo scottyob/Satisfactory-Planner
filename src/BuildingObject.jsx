@@ -8,7 +8,7 @@ const BELT_OUT = '#e8a013'
 const PIPE_IN  = '#4ab0ed'
 const PIPE_OUT = '#c87de8'
 
-const CONN_SIZE = 8   // connector marker size in px
+const CONN_SIZE = CELL_SIZE * 2   // 2m x 2m connector size
 
 function ConnectorMarker({ type, position, isInput, hw, hh }) {
   if (!position) return null
@@ -17,38 +17,64 @@ function ConnectorMarker({ type, position, isInput, hw, hh }) {
   const hs = CONN_SIZE / 2
   const ox = offset * CELL_SIZE
 
-  // Center point on the building edge
-  const cx = side === 'east' ? hw : side === 'west' ? -hw : ox
-  const cy = side === 'south' ? hh : side === 'north' ? -hh : ox
-
   const color = type === 'belt'
     ? (isInput ? BELT_IN : BELT_OUT)
     : (isInput ? PIPE_IN : PIPE_OUT)
 
+  // Position flush with building edge, fully inside the building
   if (type === 'belt') {
+    let x, y
+    if (side === 'south') {
+      x = ox - hs
+      y = hh - CONN_SIZE
+    } else if (side === 'north') {
+      x = ox - hs
+      y = -hh
+    } else if (side === 'east') {
+      x = hw - CONN_SIZE
+      y = ox - hs
+    } else if (side === 'west') {
+      x = -hw
+      y = ox - hs
+    }
     return (
       <Rect
-        x={cx - hs}
-        y={cy - hs}
+        x={x}
+        y={y}
         width={CONN_SIZE}
         height={CONN_SIZE}
-        fill={color}
-        stroke="#0a1118"
-        strokeWidth={1}
+        fill="transparent"
+        stroke={color}
+        strokeWidth={2}
         listening={false}
       />
     )
   }
 
-  // pipe → circle
+  // pipe → circle, flush with edge, fully inside
+  let cx, cy
+  if (side === 'south') {
+    cx = ox
+    cy = hh - hs
+  } else if (side === 'north') {
+    cx = ox
+    cy = -hh + hs
+  } else if (side === 'east') {
+    cx = hw - hs
+    cy = ox
+  } else if (side === 'west') {
+    cx = -hw + hs
+    cy = ox
+  }
+
   return (
     <Circle
       x={cx}
       y={cy}
       radius={hs}
-      fill={color}
-      stroke="#0a1118"
-      strokeWidth={1}
+      fill="transparent"
+      stroke={color}
+      strokeWidth={2}
       listening={false}
     />
   )
