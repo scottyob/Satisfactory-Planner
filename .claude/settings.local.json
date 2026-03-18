@@ -4,7 +4,16 @@
       "Bash(npm install:*)",
       "WebSearch",
       "WebFetch(domain:satisfactory.wiki.gg)",
-      "WebFetch(domain:www.satisfactorytools.com)"
+      "WebFetch(domain:www.satisfactorytools.com)",
+      "WebFetch(domain:ficsit.app)",
+      "WebFetch(domain:satisfactory-calculator.com)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:docs.ficsit.app)",
+      "WebFetch(domain:www.satisfactorydb.com)",
+      "WebFetch(domain:satisfactoryplanner.app)",
+      "WebFetch(domain:factoriolab.github.io)",
+      "WebFetch(domain:www.reddit.com)"
     ]
   }
 }
