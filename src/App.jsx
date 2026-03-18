@@ -474,13 +474,25 @@ export default function App() {
     input.click()
   }, [restoreLayerState])
 
+  const handleNew = useCallback(() => {
+    _nextObjId = 1
+    setObjects([])
+    setSelectedObjIds(new Set())
+    restoreLayerState(
+      [{ id: 1, name: 'Floor 1', visible: true }],
+      1, 2, 2,
+    )
+    setViewport({ scale: 1, x: dimensions.width / 2 - Math.floor(GRID_CELLS / 2) * CELL_SIZE, y: dimensions.height / 2 - Math.floor(GRID_CELLS / 2) * CELL_SIZE })
+    setFileName(null)
+  }, [dimensions.width, dimensions.height])
+
   // ── Render ────────────────────────────────────────────────────────────────
 
   const layersReversed = [...layers].reverse()
 
   return (
     <div style={{ width: '100vw', height: '100vh', background: BG_COLOR }}>
-      <Toolbar tool={tool} onToolChange={setTool} fileName={fileName} onRename={setFileName} onSave={handleSave} onLoad={handleLoad} />
+      <Toolbar tool={tool} onToolChange={setTool} fileName={fileName} onRename={setFileName} onSave={handleSave} onLoad={handleLoad} onNew={handleNew} />
 
       <div style={{ position: 'absolute', top: TOOLBAR_HEIGHT, left: 0 }}>
         <Stage

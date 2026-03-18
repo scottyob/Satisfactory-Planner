@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { PANEL_WIDTH, TOOLBAR_HEIGHT } from './constants'
 
 function PanIcon({ active }) {
@@ -33,6 +33,60 @@ const btnStyle = {
   borderRadius: 5, color: '#7aabcc', cursor: 'pointer',
   fontFamily: 'monospace', fontSize: 12, padding: '4px 10px',
   height: 30, transition: 'all 0.1s',
+}
+
+function FileMenu({ onNew, onSave, onLoad }) {
+  const [open, setOpen] = useState(false)
+  const menuRef = useRef(null)
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (menuRef.current && !menuRef.current.contains(e.target)) {
+        setOpen(false)
+      }
+    }
+    if (open) document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [open])
+
+  const menuItemStyle = {
+    display: 'block', width: '100%', textAlign: 'left',
+    background: 'transparent', border: 'none',
+    color: '#c8dff0', fontFamily: 'monospace', fontSize: 12,
+    padding: '6px 12px', cursor: 'pointer',
+  }
+
+  return (
+    <div ref={menuRef} style={{ position: 'relative' }}>
+      <button
+        style={btnStyle}
+        onClick={() => setOpen(!open)}
+      >
+        File
+      </button>
+      {open && (
+        <div
+          style={{
+            position: 'absolute', top: '100%', left: 0,
+            background: '#0d1b2a', border: '1px solid #2e5f8a',
+            borderRadius: 5, minWidth: 120,
+            boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+            zIndex: 100,
+          }}
+        >
+          <button style={menuItemStyle} onClick={() => { onNew(); setOpen(false); }}>
+            New
+          </button>
+          <button style={menuItemStyle} onClick={() => { onSave(); setOpen(false); }}>
+            Save
+          </button>
+          <button style={menuItemStyle} onClick={() => { onLoad(); setOpen(false); }}>
+            Load
+          </button>
+        </div>
+      )}
+    </div>
+  )
 }
 
 function EditableTitle({ fileName, onRename }) {
@@ -95,7 +149,7 @@ function EditableTitle({ fileName, onRename }) {
   )
 }
 
-export default function Toolbar({ tool, onToolChange, fileName, onRename, onSave, onLoad }) {
+export default function Toolbar({ tool, onToolChange, fileName, onRename, onSave, onLoad, onNew }) {
   return (
     <div
       style={{
@@ -114,6 +168,10 @@ export default function Toolbar({ tool, onToolChange, fileName, onRename, onSave
       }}
     >
       <EditableTitle fileName={fileName} onRename={onRename} />
+
+      <div style={{ width: 1, height: 24, background: '#1e3a54', margin: '0 8px' }} />
+
+      <FileMenu onNew={onNew} onSave={onSave} onLoad={onLoad} />
 
       <div style={{ width: 1, height: 24, background: '#1e3a54', margin: '0 8px' }} />
 
@@ -139,15 +197,6 @@ export default function Toolbar({ tool, onToolChange, fileName, onRename, onSave
           </button>
         )
       })}
-
-      <div style={{ width: 1, height: 24, background: '#1e3a54', margin: '0 8px' }} />
-
-      <button style={btnStyle} onClick={onSave} title="Save factory to file">
-        Save
-      </button>
-      <button style={btnStyle} onClick={onLoad} title="Load factory from file">
-        Load
-      </button>
     </div>
   )
 }
