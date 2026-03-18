@@ -134,6 +134,8 @@ function ZoomControls({ onZoom, onReset }) {
 
 export default function App() {
   const stageRef   = useRef(null)
+  const midPanRef  = useRef(null)
+  const viewportRef = useRef(null)
   const [tool, setTool] = useState('pan')
 
   const stageW = () => window.innerWidth  - PANEL_WIDTH
@@ -160,6 +162,9 @@ export default function App() {
     return () => window.removeEventListener('resize', onResize)
   }, [])
 
+  // Keep viewportRef in sync for use in event handlers
+  viewportRef.current = viewport
+
   // Keyboard tool switch
   useEffect(() => {
     const onKey = (e) => {
@@ -170,6 +175,37 @@ export default function App() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  // Middle mouse pan (works regardless of active tool)
+  useEffect(() => {
+    const container = stageRef.current?.container()
+    if (!container) return
+    const onMouseDown = (e) => {
+      if (e.button !== 1) return
+      e.preventDefault()
+      midPanRef.current = {
+        startX: e.clientX, startY: e.clientY,
+        startVX: viewportRef.current.x, startVY: viewportRef.current.y,
+      }
+    }
+    const onMouseMove = (e) => {
+      if (!midPanRef.current) return
+      setViewport(v => ({
+        ...v,
+        x: midPanRef.current.startVX + (e.clientX - midPanRef.current.startX),
+        y: midPanRef.current.startVY + (e.clientY - midPanRef.current.startY),
+      }))
+    }
+    const onMouseUp = (e) => { if (e.button === 1) midPanRef.current = null }
+    container.addEventListener('mousedown', onMouseDown)
+    window.addEventListener('mousemove', onMouseMove)
+    window.addEventListener('mouseup', onMouseUp)
+    return () => {
+      container.removeEventListener('mousedown', onMouseDown)
+      window.removeEventListener('mousemove', onMouseMove)
+      window.removeEventListener('mouseup', onMouseUp)
+    }
   }, [])
 
   // ── Zoom ──────────────────────────────────────────────────────────────────
