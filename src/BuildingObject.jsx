@@ -124,7 +124,7 @@ export default function BuildingObject({
         y={-hh}
         width={pw}
         height={ph}
-        fill={`${color}18`}
+        fill={`${color}33`}
         stroke={color}
         strokeWidth={isSelected ? 1.5 : 1}
         cornerRadius={2}

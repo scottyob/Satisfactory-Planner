@@ -395,10 +395,11 @@ export default function App() {
       // via the native click event) still suppresses the stage-background deselect.
       wasDraggingMarqueeRef.current = true
 
-      // Select all buildings that overlap the final marquee rect
+      // Select all buildings on the ACTIVE layer that overlap the final marquee rect
       const selected = new Set(
         objectsRef.current
           .filter(obj => {
+            if (obj.layerId !== selectedId) return false  // ignore other floors
             const def = BUILDINGS_BY_KEY[obj.type]
             if (!def) return false
             const hw = def.w * CELL_SIZE / 2
@@ -524,7 +525,7 @@ export default function App() {
             const layerObjs = objects.filter(o => o.layerId === layer.id)
 
             return (
-              <Layer key={layer.id} opacity={opacity}>
+              <Layer key={layer.id} opacity={opacity} listening={isActive}>
                 {layerObjs.map(obj => (
                   <BuildingObject
                     key={obj.id}

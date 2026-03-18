@@ -100,6 +100,23 @@ function DragHandle() {
 
 // ─── Layer item ──────────────────────────────────────────────────────────────
 
+function EyeIcon({ open }) {
+  return (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" style={{ flexShrink: 0, cursor: 'pointer' }}>
+      {open ? (
+        <>
+          <path d="M1 7c0 2.5 2.5 5 6 5s6-2.5 6-5-2.5-5-6-5S1 4.5 1 7z" stroke="#4a9eda" strokeWidth="1.5" />
+          <circle cx="7" cy="7" r="2" fill="#4a9eda" />
+        </>
+      ) : (
+        <>
+          <path d="M1 7c0 2.5 2.5 5 6 5 1.2 0 2.3-.3 3.2-.8M13 7c0-2.5-2.5-5-6-5-1.2 0-2.3.3-3.2.8M1 1l12 12" stroke="#3a5a7a" strokeWidth="1.5" strokeLinecap="round" />
+        </>
+      )}
+    </svg>
+  )
+}
+
 function LayerItem({ layer, isSelected, onSelect, onToggleVisible, onRename, dragHandlers }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(layer.name)
@@ -136,13 +153,9 @@ function LayerItem({ layer, isSelected, onSelect, onToggleVisible, onRename, dra
     >
       <DragHandle />
 
-      <input
-        type="checkbox"
-        checked={layer.visible}
-        onChange={() => onToggleVisible(layer.id)}
-        onClick={e => e.stopPropagation()}
-        style={{ accentColor: '#4a9eda', cursor: 'pointer', flexShrink: 0 }}
-      />
+      <div onClick={(e) => { e.stopPropagation(); onToggleVisible(layer.id); }}>
+        <EyeIcon open={isSelected || layer.visible} />
+      </div>
 
       {/* Layer stack icon */}
       <svg width="13" height="13" viewBox="0 0 13 13" fill="none" style={{ flexShrink: 0 }}>
