@@ -12,7 +12,9 @@
 //
 // position is { side: 'north'|'south'|'east'|'west', offset: number }
 // where offset is in grid cells from the center of that side.
-// position: null means TBD — not yet mapped.
+// Positive offset = east (on N/S sides) or south (on E/W sides).
+// Convention: inputs enter from the south (bottom), outputs exit from the north (top).
+// Positions are approximate — derived from game knowledge, not blueprint data.
 
 const BUILDINGS = [
 
@@ -23,10 +25,10 @@ const BUILDINGS = [
     w: 5,
     h: 9,
     inputs: [
-      { type: 'belt', position: null },
+      { type: 'belt', position: { side: 'south', offset: 0 } },
     ],
     outputs: [
-      { type: 'belt', position: null },
+      { type: 'belt', position: { side: 'north', offset: 0 } },
     ],
   },
 
@@ -37,11 +39,11 @@ const BUILDINGS = [
     w: 10,
     h: 9,
     inputs: [
-      { type: 'belt', position: null },
-      { type: 'belt', position: null },
+      { type: 'belt', position: { side: 'south', offset: -2 } },
+      { type: 'belt', position: { side: 'south', offset:  2 } },
     ],
     outputs: [
-      { type: 'belt', position: null },
+      { type: 'belt', position: { side: 'north', offset: 0 } },
     ],
   },
 
@@ -52,10 +54,10 @@ const BUILDINGS = [
     w: 8,
     h: 10,
     inputs: [
-      { type: 'belt', position: null },
+      { type: 'belt', position: { side: 'south', offset: 0 } },
     ],
     outputs: [
-      { type: 'belt', position: null },
+      { type: 'belt', position: { side: 'north', offset: 0 } },
     ],
   },
 
@@ -66,11 +68,11 @@ const BUILDINGS = [
     w: 10,
     h: 15,
     inputs: [
-      { type: 'belt', position: null },
-      { type: 'belt', position: null },
+      { type: 'belt', position: { side: 'south', offset: -2 } },
+      { type: 'belt', position: { side: 'south', offset:  2 } },
     ],
     outputs: [
-      { type: 'belt', position: null },
+      { type: 'belt', position: { side: 'north', offset: 0 } },
     ],
   },
 
@@ -81,13 +83,13 @@ const BUILDINGS = [
     w: 18,
     h: 20,
     inputs: [
-      { type: 'belt', position: null },
-      { type: 'belt', position: null },
-      { type: 'belt', position: null },
-      { type: 'belt', position: null },
+      { type: 'belt', position: { side: 'south', offset: -6 } },
+      { type: 'belt', position: { side: 'south', offset: -2 } },
+      { type: 'belt', position: { side: 'south', offset:  2 } },
+      { type: 'belt', position: { side: 'south', offset:  6 } },
     ],
     outputs: [
-      { type: 'belt', position: null },
+      { type: 'belt', position: { side: 'north', offset: 0 } },
     ],
   },
 
@@ -98,12 +100,12 @@ const BUILDINGS = [
     w: 10,
     h: 20,
     inputs: [
-      { type: 'belt', position: null },
-      { type: 'pipe', position: null },
+      { type: 'belt', position: { side: 'south', offset: -2 } },
+      { type: 'pipe', position: { side: 'south', offset:  2 } },
     ],
     outputs: [
-      { type: 'belt', position: null },
-      { type: 'pipe', position: null },
+      { type: 'belt', position: { side: 'north', offset: -2 } },
+      { type: 'pipe', position: { side: 'north', offset:  2 } },
     ],
   },
 
@@ -114,14 +116,14 @@ const BUILDINGS = [
     w: 18,
     h: 16,
     inputs: [
-      { type: 'belt', position: null },
-      { type: 'belt', position: null },
-      { type: 'pipe', position: null },
-      { type: 'pipe', position: null },
+      { type: 'belt', position: { side: 'south', offset: -6 } },
+      { type: 'belt', position: { side: 'south', offset: -2 } },
+      { type: 'pipe', position: { side: 'south', offset:  2 } },
+      { type: 'pipe', position: { side: 'south', offset:  6 } },
     ],
     outputs: [
-      { type: 'belt', position: null },
-      { type: 'pipe', position: null },
+      { type: 'belt', position: { side: 'north', offset: -3 } },
+      { type: 'pipe', position: { side: 'north', offset:  3 } },
     ],
   },
 
@@ -132,12 +134,12 @@ const BUILDINGS = [
     w: 8,
     h: 8,
     inputs: [
-      { type: 'belt', position: null },
-      { type: 'pipe', position: null },
+      { type: 'belt', position: { side: 'south', offset: -1 } },
+      { type: 'pipe', position: { side: 'south', offset:  1 } },
     ],
     outputs: [
-      { type: 'belt', position: null },
-      { type: 'pipe', position: null },
+      { type: 'belt', position: { side: 'north', offset: -1 } },
+      { type: 'pipe', position: { side: 'north', offset:  1 } },
     ],
   },
 
@@ -148,12 +150,12 @@ const BUILDINGS = [
     w: 26,
     h: 38,
     inputs: [
-      { type: 'belt', position: null },
-      { type: 'belt', position: null },
-      { type: 'pipe', position: null },
+      { type: 'belt', position: { side: 'south', offset: -8 } },
+      { type: 'belt', position: { side: 'south', offset:  0 } },
+      { type: 'pipe', position: { side: 'south', offset:  8 } },
     ],
     outputs: [
-      { type: 'belt', position: null },
+      { type: 'belt', position: { side: 'north', offset: 0 } },
     ],
   },
 
@@ -164,14 +166,14 @@ const BUILDINGS = [
     w: 20,
     h: 20,
     inputs: [
-      { type: 'belt', position: null },
-      { type: 'belt', position: null },
-      { type: 'belt', position: null },
-      { type: 'pipe', position: null },
+      { type: 'belt', position: { side: 'south', offset: -6 } },
+      { type: 'belt', position: { side: 'south', offset: -2 } },
+      { type: 'belt', position: { side: 'south', offset:  2 } },
+      { type: 'pipe', position: { side: 'south', offset:  6 } },
     ],
     outputs: [
-      { type: 'belt', position: null },
-      { type: 'pipe', position: null },
+      { type: 'belt', position: { side: 'north', offset: -3 } },
+      { type: 'pipe', position: { side: 'north', offset:  3 } },
     ],
   },
 
@@ -182,12 +184,12 @@ const BUILDINGS = [
     w: 10,
     h: 10,
     inputs: [
-      { type: 'belt', position: null },
-      { type: 'belt', position: null },
+      { type: 'belt', position: { side: 'south', offset: -2 } },
+      { type: 'belt', position: { side: 'south', offset:  2 } },
     ],
     outputs: [
-      { type: 'belt', position: null },
-      { type: 'belt', position: null },
+      { type: 'belt', position: { side: 'north', offset: -2 } },
+      { type: 'belt', position: { side: 'north', offset:  2 } },
     ],
   },
 

@@ -12,6 +12,7 @@ src/
   LayersPanel.jsx   # Right panel: layer list + buildings palette
   constants.js      # Shared numeric constants
   recipes.js        # Full Satisfactory 1.0 recipe database (150 recipes)
+  buildings.js      # Building definitions — sizes, colors, connector positions
 ```
 
 ## Constants (`constants.js`)
@@ -148,6 +149,58 @@ RECIPE_BUILDINGS                // → ['smelter', 'constructor', ...]
 
 ### Buildings covered
 `smelter`, `foundry`, `constructor`, `assembler`, `manufacturer`, `refinery`, `blender`, `packager`, `particleAccelerator`, `quantumEncoder`, `converter`
+
+## buildings.js — Building Definitions
+
+Defines all placeable factory buildings for canvas rendering and connector routing.
+
+### Building shape
+```js
+{
+  key:     string,   // camelCase, matches recipe.building e.g. 'constructor'
+  label:   string,   // short display label e.g. 'Constructor'
+  color:   string,   // hex color for canvas rect fill
+  w:       number,   // width in grid cells (foundations)
+  h:       number,   // height in grid cells (foundations)
+  inputs:  [{ type, position }],
+  outputs: [{ type, position }],
+}
+```
+
+### Connector shape
+```js
+{
+  type:     'belt' | 'pipe',
+  position: { side: 'north'|'south'|'east'|'west', offset: number },
+}
+```
+`offset` is in grid cells from the center of that side. Positive = east (on N/S sides) or south (on E/W sides). Convention: inputs enter from the **south** (bottom), outputs exit from the **north** (top). Positions are approximate — derived from game knowledge, not blueprint data.
+
+### Buildings defined
+
+| Key | w | h | Belt in | Pipe in | Belt out | Pipe out |
+|---|---|---|---|---|---|---|
+| `smelter` | 5 | 9 | 1 | 0 | 1 | 0 |
+| `foundry` | 10 | 9 | 2 | 0 | 1 | 0 |
+| `constructor` | 8 | 10 | 1 | 0 | 1 | 0 |
+| `assembler` | 10 | 15 | 2 | 0 | 1 | 0 |
+| `manufacturer` | 18 | 20 | 4 | 0 | 1 | 0 |
+| `refinery` | 10 | 20 | 1 | 1 | 1 | 1 |
+| `blender` | 18 | 16 | 2 | 2 | 1 | 1 |
+| `packager` | 8 | 8 | 1 | 1 | 1 | 1 |
+| `particleAccelerator` | 26 | 38 | 2 | 1 | 1 | 0 |
+| `quantumEncoder` | 20 | 20 | 3 | 1 | 1 | 1 |
+| `converter` | 10 | 10 | 2 | 0 | 2 | 0 |
+
+### Exports
+```js
+import BUILDINGS, { BUILDINGS_BY_KEY } from './buildings.js'
+
+BUILDINGS_BY_KEY['constructor']   // → building def
+```
+
+### Note on BUILDING_DEFS in App.jsx
+`App.jsx` has a local `BUILDING_DEFS` object (used for canvas rendering) that duplicates size/color data from `buildings.js`. These should eventually be consolidated.
 
 ## Color Palette
 

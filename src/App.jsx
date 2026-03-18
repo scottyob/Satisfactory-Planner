@@ -1,19 +1,15 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
-import { Stage, Layer, Line, Rect, Group, Text } from 'react-konva'
+import { Stage, Layer, Line, Rect } from 'react-konva'
 import { CELL_SIZE, GRID_CELLS, GRID_PX, PANEL_WIDTH, TOOLBAR_HEIGHT } from './constants'
 import Toolbar from './Toolbar.jsx'
 import LayersPanel, { useLayers } from './LayersPanel.jsx'
+import BuildingObject from './BuildingObject.jsx'
 
 const BG_COLOR    = '#0a1118'
 const MINOR_COLOR = '#141e28'
 const MAJOR_COLOR = '#1a2a38'
 const AXIS_COLOR  = '#1e3a54'
 
-// ─── Building definitions ────────────────────────────────────────────────────
-
-const BUILDING_DEFS = {
-  constructor: { w: 8, h: 10, color: '#e87c13', label: 'CNSTR' },
-}
 
 let _nextObjId = 1
 
@@ -35,72 +31,6 @@ function Grid() {
   return <>{lines}</>
 }
 
-// ─── Canvas building object ──────────────────────────────────────────────────
-
-function BuildingObject({ obj, isSelected, canDrag, onPointerDown, onDragStart, onDragMove, onDragEnd }) {
-  const def   = BUILDING_DEFS[obj.type]
-  const pw    = def.w * CELL_SIZE
-  const ph    = def.h * CELL_SIZE
-  const color = def.color
-  const hw    = pw / 2
-  const hh    = ph / 2
-
-  return (
-    <Group
-      x={obj.x}
-      y={obj.y}
-      rotation={obj.rotation}
-      draggable={canDrag}
-      onMouseDown={onPointerDown}
-      onDragStart={onDragStart}
-      onDragMove={onDragMove}
-      onDragEnd={onDragEnd}
-    >
-      {/* Selection glow — centered on group origin */}
-      {isSelected && (
-        <Rect
-          x={-hw - 3}
-          y={-hh - 3}
-          width={pw + 6}
-          height={ph + 6}
-          cornerRadius={4}
-          fill="transparent"
-          stroke="#4a9eda"
-          strokeWidth={1.5}
-          dash={[4, 3]}
-          listening={false}
-        />
-      )}
-
-      {/* Building body */}
-      <Rect
-        x={-hw}
-        y={-hh}
-        width={pw}
-        height={ph}
-        fill={`${color}18`}
-        stroke={color}
-        strokeWidth={isSelected ? 1.5 : 1}
-        cornerRadius={2}
-      />
-
-      {/* Label */}
-      <Text
-        x={-hw}
-        y={-hh}
-        text={def.label}
-        width={pw}
-        height={ph}
-        align="center"
-        verticalAlign="middle"
-        fontSize={8}
-        fontFamily="monospace"
-        fill={color}
-        listening={false}
-      />
-    </Group>
-  )
-}
 
 // ─── HUD overlays ────────────────────────────────────────────────────────────
 

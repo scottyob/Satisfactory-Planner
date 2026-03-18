@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { PANEL_WIDTH, CELL_SIZE } from './constants'
+import BUILDINGS from './buildings.js'
 
 const BUILDINGS_HEIGHT = 192
 
@@ -160,26 +161,16 @@ function LayerItem({ layer, isSelected, onSelect, onToggleVisible, onRename, dra
 
 // ─── Buildings tab ───────────────────────────────────────────────────────────
 
-const BUILDING_DEFS = [
-  {
-    id: 'constructor',
-    label: 'Constructor',
-    shortLabel: 'CNSTR',
-    w: 0.8,
-    h: 1.0,
-    color: '#e87c13',
-  },
-]
-
 function BuildingCard({ def, onAdd }) {
   const [hovered, setHovered] = useState(false)
-  const pw = def.w * 28   // preview pixel width
-  const ph = def.h * 28   // preview pixel height
+  const scale = 28 / Math.max(def.w, def.h)
+  const pw = def.w * scale   // preview pixel width
+  const ph = def.h * scale   // preview pixel height
 
   return (
     <div
-      title={`${def.label} (${def.w} × ${def.h})`}
-      onClick={() => onAdd(def.id)}
+      title={`${def.label} (${def.w} × ${def.h} cells)`}
+      onClick={() => onAdd(def.key)}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       style={{
@@ -208,8 +199,8 @@ function BuildingCard({ def, onAdd }) {
         alignItems: 'center',
         justifyContent: 'center',
       }}>
-        <span style={{ fontSize: 7, color: def.color, fontFamily: 'monospace', fontWeight: 'bold' }}>
-          {def.shortLabel}
+        <span style={{ fontSize: 7, color: def.color, fontFamily: 'monospace', fontWeight: 'bold', textAlign: 'center', lineHeight: 1 }}>
+          {def.label.slice(0, 4).toUpperCase()}
         </span>
       </div>
 
@@ -226,8 +217,8 @@ function BuildingCard({ def, onAdd }) {
 function BuildingsTab({ onAddBuilding }) {
   return (
     <div style={{ padding: 8, display: 'flex', flexWrap: 'wrap', gap: 6, alignContent: 'flex-start' }}>
-      {BUILDING_DEFS.map(def => (
-        <BuildingCard key={def.id} def={def} onAdd={onAddBuilding} />
+      {BUILDINGS.map(def => (
+        <BuildingCard key={def.key} def={def} onAdd={onAddBuilding} />
       ))}
     </div>
   )
