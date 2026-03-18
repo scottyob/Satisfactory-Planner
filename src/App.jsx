@@ -96,10 +96,10 @@ function BuildingObject({ obj, isSelected, canDrag, onPointerDown, onDragMove, o
 
 // ─── HUD overlays ────────────────────────────────────────────────────────────
 
-function CoordHUD({ position, scale, stageWidth }) {
+function CoordHUD({ position, scale, stageWidth, stageHeight }) {
   const center = Math.floor(GRID_CELLS / 2)
   const cx = stageWidth / 2
-  const cy = window.innerHeight / 2
+  const cy = stageHeight / 2
   const wx = ((cx - position.x) / scale / CELL_SIZE - center).toFixed(1)
   const wy = ((cy - position.y) / scale / CELL_SIZE - center).toFixed(1)
 
@@ -142,8 +142,8 @@ export default function App() {
   const [dimensions, setDimensions] = useState({ width: stageW(), height: stageH() })
 
   const center = Math.floor(GRID_CELLS / 2)
-  const [scale, setScale]       = useState(1)
-  const [position, setPosition] = useState(() => ({
+  const [viewport, setViewport] = useState(() => ({
+    scale: 1,
     x: stageW() / 2 - center * CELL_SIZE,
     y: stageH() / 2 - center * CELL_SIZE,
   }))
@@ -175,20 +175,20 @@ export default function App() {
   // ── Zoom ──────────────────────────────────────────────────────────────────
 
   const zoomAtPoint = useCallback((px, py, dir) => {
-    setScale(prev => {
-      const next = Math.min(Math.max(prev * (dir > 0 ? 1.12 : 1 / 1.12), 0.05), 10)
-      setPosition(pos => ({
-        x: px - (px - pos.x) * (next / prev),
-        y: py - (py - pos.y) * (next / prev),
-      }))
-      return next
+    setViewport(prev => {
+      const next = Math.min(Math.max(prev.scale * (dir > 0 ? 1.12 : 1 / 1.12), 0.05), 10)
+      return {
+        scale: next,
+        x: px - (px - prev.x) * (next / prev.scale),
+        y: py - (py - prev.y) * (next / prev.scale),
+      }
     })
   }, [])
 
   const handleWheel = useCallback((e) => {
     e.evt.preventDefault()
-    const ptr = stageRef.current.getPointerPosition()
-    zoomAtPoint(ptr.x, ptr.y, e.evt.deltaY < 0 ? 1 : -1)
+    const pointer = stageRef.current.getPointerPosition()
+    zoomAtPoint(pointer.x, pointer.y, e.evt.deltaY < 0 ? 1 : -1)
   }, [zoomAtPoint])
 
   const handleZoomBtn = useCallback((dir) => {
@@ -196,8 +196,7 @@ export default function App() {
   }, [zoomAtPoint, dimensions])
 
   const handleReset = useCallback(() => {
-    setScale(1)
-    setPosition({ x: dimensions.width / 2 - center * CELL_SIZE, y: dimensions.height / 2 - center * CELL_SIZE })
+    setViewport({ scale: 1, x: dimensions.width / 2 - center * CELL_SIZE, y: dimensions.height / 2 - center * CELL_SIZE })
   }, [dimensions, center])
 
   // ── Objects ───────────────────────────────────────────────────────────────
@@ -206,8 +205,8 @@ export default function App() {
 
   const addBuilding = useCallback((type) => {
     const def = BUILDING_DEFS[type]
-    const vpX = (dimensions.width  / 2 - position.x) / scale
-    const vpY = (dimensions.height / 2 - position.y) / scale
+    const vpX = (dimensions.width  / 2 - viewport.x) / viewport.scale
+    const vpY = (dimensions.height / 2 - viewport.y) / viewport.scale
     const obj = {
       id:      _nextObjId++,
       type,
@@ -217,7 +216,7 @@ export default function App() {
     }
     setObjects(prev => [...prev, obj])
     setSelectedObjId(obj.id)
-  }, [dimensions, position, scale, selectedId])
+  }, [dimensions, viewport, selectedId])
 
   const updateObjPos = useCallback((id, x, y) => {
     setObjects(prev => prev.map(o => o.id === id ? { ...o, x, y } : o))
@@ -253,11 +252,11 @@ export default function App() {
           width={dimensions.width}
           height={dimensions.height}
           draggable={tool === 'pan'}
-          x={position.x}
-          y={position.y}
-          scaleX={scale}
-          scaleY={scale}
-          onDragEnd={(e) => setPosition({ x: e.target.x(), y: e.target.y() })}
+          x={viewport.x}
+          y={viewport.y}
+          scaleX={viewport.scale}
+          scaleY={viewport.scale}
+          onDragEnd={(e) => setViewport(v => ({ ...v, x: e.target.x(), y: e.target.y() }))}
           onWheel={handleWheel}
           onClick={handleStageClick}
           style={{ cursor: tool === 'pan' ? 'grab' : 'default' }}
@@ -301,7 +300,7 @@ export default function App() {
       </div>
 
       {/* HUD */}
-      <CoordHUD position={position} scale={scale} stageWidth={dimensions.width} />
+      <CoordHUD position={viewport} scale={viewport.scale} stageWidth={dimensions.width} stageHeight={dimensions.height} />
       <ZoomControls onZoom={handleZoomBtn} onReset={handleReset} />
 
       <LayersPanel
