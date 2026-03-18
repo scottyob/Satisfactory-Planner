@@ -1,4 +1,4 @@
-import { Group, Rect, Text, Circle } from 'react-konva'
+import { Group, Rect, Text, Circle, Line } from 'react-konva'
 import { CELL_SIZE } from './constants'
 import { BUILDINGS_BY_KEY } from './buildings.js'
 import { CONNECTORS_BY_KEY } from './LayersPanel.jsx'
@@ -9,7 +9,8 @@ const BELT_OUT = '#e8a013'
 const PIPE_IN  = '#4ab0ed'
 const PIPE_OUT = '#c87de8'
 
-const CONN_SIZE = CELL_SIZE * 2   // 2m x 2m connector size
+const CONN_SIZE = CELL_SIZE * 2       // 2m connector width
+const CONN_DEPTH = CELL_SIZE * 0.5    // 0.5m connector depth
 
 const ALL_BUILDINGS_BY_KEY = { ...BUILDINGS_BY_KEY, ...CONNECTORS_BY_KEY }
 
@@ -24,37 +25,78 @@ function ConnectorMarker({ type, position, isInput, hw, hh }) {
     ? (isInput ? BELT_IN : BELT_OUT)
     : (isInput ? PIPE_IN : PIPE_OUT)
 
-  // Position flush with building edge, fully inside the building
+  // Belt connectors: 2m wide × 0.5m deep rectangles at building edge
   if (type === 'belt') {
-    let x, y
+    let x, y, arrowDir
+    const arrowDepth = CONN_DEPTH * 0.6   // Arrow depth (60% of connector depth)
+    const arrowHalfWidth = CELL_SIZE * 0.15  // Arrow half-width (thinner arrows)
+    const gap = CELL_SIZE * 0.2           // Gap between arrows
+    const totalArrowWidth = arrowHalfWidth * 2 * 4 + gap * 3  // 4 arrows + 3 gaps
+    const startX = -(totalArrowWidth / 2) + arrowHalfWidth  // Start from first arrow center
+
     if (side === 'south') {
       x = ox - hs
-      y = hh - CONN_SIZE
+      y = hh - CONN_DEPTH
+      arrowDir = isInput ? -1 : 1  // -1 = up (into building), 1 = down (out)
     } else if (side === 'north') {
       x = ox - hs
       y = -hh
+      arrowDir = isInput ? 1 : -1  // 1 = down (into building), -1 = up (out)
     } else if (side === 'east') {
-      x = hw - CONN_SIZE
+      x = hw - CONN_DEPTH
       y = ox - hs
+      arrowDir = isInput ? -1 : 1  // -1 = left (into building), 1 = right (out)
     } else if (side === 'west') {
       x = -hw
       y = ox - hs
+      arrowDir = isInput ? 1 : -1  // 1 = right (into building), -1 = left (out)
     }
+
+    const arrows = [0, 1, 2, 3].map((i) => {
+      let points
+      const pos = startX + i * (arrowHalfWidth * 2 + gap)  // Position of each arrow center
+      const depthPadding = (CONN_DEPTH - arrowDepth) / 2
+      if (side === 'south' || side === 'north') {
+        const tipY = isInput
+          ? (side === 'south' ? CONN_DEPTH - depthPadding : depthPadding)
+          : (side === 'south' ? depthPadding : CONN_DEPTH - depthPadding)
+        const baseY = tipY - arrowDir * arrowDepth
+        points = [pos, tipY, pos - arrowHalfWidth, baseY, pos + arrowHalfWidth, baseY]
+      } else {
+        const tipX = isInput
+          ? (side === 'east' ? CONN_DEPTH - depthPadding : depthPadding)
+          : (side === 'east' ? depthPadding : CONN_DEPTH - depthPadding)
+        const baseX = tipX - arrowDir * arrowDepth
+        points = [tipX, pos, baseX, pos - arrowHalfWidth, baseX, pos + arrowHalfWidth]
+      }
+      return (
+        <Line
+          key={i}
+          points={points}
+          closed={true}
+          fill={color}
+          opacity={0.7}
+          listening={false}
+        />
+      )
+    })
+
     return (
-      <Rect
-        x={x}
-        y={y}
-        width={CONN_SIZE}
-        height={CONN_SIZE}
-        fill="transparent"
-        stroke={color}
-        strokeWidth={2}
-        listening={false}
-      />
+      <Group x={x} y={y}>
+        <Rect
+          width={side === 'south' || side === 'north' ? CONN_SIZE : CONN_DEPTH}
+          height={side === 'south' || side === 'north' ? CONN_DEPTH : CONN_SIZE}
+          fill="transparent"
+          stroke={color}
+          strokeWidth={2}
+          listening={false}
+        />
+        {arrows}
+      </Group>
     )
   }
 
-  // pipe → circle, flush with edge, fully inside
+  // Pipe connectors: circle, flush with edge
   let cx, cy
   if (side === 'south') {
     cx = ox
