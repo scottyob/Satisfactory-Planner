@@ -1,6 +1,7 @@
 import { Group, Rect, Text, Circle } from 'react-konva'
 import { CELL_SIZE } from './constants'
 import { BUILDINGS_BY_KEY } from './buildings.js'
+import { CONNECTORS_BY_KEY } from './LayersPanel.jsx'
 
 // Connector colors: belt vs pipe, input vs output
 const BELT_IN  = '#5ee877'
@@ -9,6 +10,8 @@ const PIPE_IN  = '#4ab0ed'
 const PIPE_OUT = '#c87de8'
 
 const CONN_SIZE = CELL_SIZE * 2   // 2m x 2m connector size
+
+const ALL_BUILDINGS_BY_KEY = { ...BUILDINGS_BY_KEY, ...CONNECTORS_BY_KEY }
 
 function ConnectorMarker({ type, position, isInput, hw, hh }) {
   if (!position) return null
@@ -84,7 +87,7 @@ export default function BuildingObject({
   obj, isSelected, canDrag,
   onPointerDown, onDragStart, onDragMove, onDragEnd,
 }) {
-  const def   = BUILDINGS_BY_KEY[obj.type]
+  const def   = ALL_BUILDINGS_BY_KEY[obj.type]
   const pw    = def.w * CELL_SIZE
   const ph    = def.h * CELL_SIZE
   const hw    = pw / 2

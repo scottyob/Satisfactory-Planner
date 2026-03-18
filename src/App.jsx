@@ -1,10 +1,34 @@
-import { useState, useCallback, useEffect, useRef } from 'react'
+import { useState, useCallback, useEffect, useRef, Component } from 'react'
 import { Stage, Layer, Line, Rect } from 'react-konva'
 import { CELL_SIZE, GRID_CELLS, GRID_PX, PANEL_WIDTH, TOOLBAR_HEIGHT } from './constants'
 import Toolbar from './Toolbar.jsx'
 import LayersPanel, { useLayers } from './LayersPanel.jsx'
 import BuildingObject from './BuildingObject.jsx'
 import { BUILDINGS_BY_KEY } from './buildings.js'
+
+// Error boundary to catch rendering errors and reset state
+class ErrorBoundary extends Component {
+  constructor(props) {
+    super(props)
+    this.state = { hasError: false }
+  }
+
+  static getDerivedStateFromError() {
+    return { hasError: true }
+  }
+
+  componentDidCatch(error) {
+    console.error('Render error, resetting:', error)
+  }
+
+  render() {
+    if (this.state.hasError) {
+      this.props.onReset()
+      return null
+    }
+    return this.props.children
+  }
+}
 
 const BG_COLOR    = '#0a1118'
 const MINOR_COLOR = '#141e28'
@@ -444,6 +468,18 @@ export default function App() {
     URL.revokeObjectURL(url)
   }, [objects, layers, selectedId, viewport, fileName, _nextLayerId, _nextFloorNum])
 
+  const handleNew = useCallback(() => {
+    _nextObjId = 1
+    setObjects([])
+    setSelectedObjIds(new Set())
+    restoreLayerState(
+      [{ id: 1, name: 'Floor 1', visible: true }],
+      1, 2, 2,
+    )
+    setViewport({ scale: 1, x: dimensions.width / 2 - Math.floor(GRID_CELLS / 2) * CELL_SIZE, y: dimensions.height / 2 - Math.floor(GRID_CELLS / 2) * CELL_SIZE })
+    setFileName(null)
+  }, [dimensions.width, dimensions.height])
+
   const handleLoad = useCallback(() => {
     const input    = document.createElement('input')
     input.type     = 'file'
@@ -466,26 +502,15 @@ export default function App() {
           )
           if (state.viewport) setViewport(state.viewport)
           setFileName(file.name)
-        } catch {
-          console.error('Failed to load file')
+        } catch (err) {
+          console.error('Failed to load file, starting fresh:', err)
+          handleNew()
         }
       }
       reader.readAsText(file)
     }
     input.click()
-  }, [restoreLayerState])
-
-  const handleNew = useCallback(() => {
-    _nextObjId = 1
-    setObjects([])
-    setSelectedObjIds(new Set())
-    restoreLayerState(
-      [{ id: 1, name: 'Floor 1', visible: true }],
-      1, 2, 2,
-    )
-    setViewport({ scale: 1, x: dimensions.width / 2 - Math.floor(GRID_CELLS / 2) * CELL_SIZE, y: dimensions.height / 2 - Math.floor(GRID_CELLS / 2) * CELL_SIZE })
-    setFileName(null)
-  }, [dimensions.width, dimensions.height])
+  }, [restoreLayerState, handleNew])
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -496,84 +521,86 @@ export default function App() {
       <Toolbar tool={tool} onToolChange={setTool} fileName={fileName} onRename={setFileName} onSave={handleSave} onLoad={handleLoad} onNew={handleNew} />
 
       <div style={{ position: 'absolute', top: TOOLBAR_HEIGHT, left: 0 }}>
-        <Stage
-          ref={stageRef}
-          width={dimensions.width}
-          height={dimensions.height}
-          draggable={tool === 'pan'}
-          x={viewport.x}
-          y={viewport.y}
-          scaleX={viewport.scale}
-          scaleY={viewport.scale}
-          onDragEnd={(e) => { if (e.target === e.target.getStage()) setViewport(v => ({ ...v, x: e.target.x(), y: e.target.y() })) }}
-          onWheel={handleWheel}
-          onClick={handleStageClick}
-          style={{ cursor: tool === 'pan' ? 'grab' : 'default' }}
-        >
-          {/* Base grid */}
-          <Layer>
-            <Rect x={0} y={0} width={GRID_PX} height={GRID_PX} fill={BG_COLOR} listening={false} />
-            <Grid />
-          </Layer>
-
-          {/* One Konva Layer per UI layer, bottom-to-top */}
-          {layersReversed.map(layer => {
-            const isActive  = layer.id === selectedId
-            const isVisible = isActive || layer.visible
-            if (!isVisible) return null
-            const opacity   = isActive ? 1 : 0.15
-            const layerObjs = objects.filter(o => o.layerId === layer.id)
-
-            return (
-              <Layer key={layer.id} opacity={opacity} listening={isActive}>
-                {layerObjs.map(obj => (
-                  <BuildingObject
-                    key={obj.id}
-                    obj={obj}
-                    isSelected={selectedObjIds.has(obj.id)}
-                    canDrag={tool === 'pointer'}
-                    onPointerDown={(e) => {
-                      if (tool !== 'pointer') return
-                      e.cancelBubble = true
-                      if (e.evt.shiftKey) {
-                        // Shift-click: toggle this object in/out of selection
-                        setSelectedObjIds(prev => {
-                          const next = new Set(prev)
-                          if (next.has(obj.id)) next.delete(obj.id)
-                          else next.add(obj.id)
-                          return next
-                        })
-                      } else if (!selectedObjIds.has(obj.id)) {
-                        // Normal click on unselected object: select only it
-                        setSelectedObjIds(new Set([obj.id]))
-                      }
-                      // Normal click on already-selected object: keep selection (allows drag)
-                    }}
-                    onDragStart={(e) => handleObjDragStart(e, obj.id)}
-                    onDragMove={(e)  => handleObjDragMove(e, obj.id)}
-                    onDragEnd={(e)   => handleObjDragEnd(e, obj.id)}
-                  />
-                ))}
-              </Layer>
-            )
-          })}
-
-          {/* Marquee selection rectangle */}
-          {marquee && (
-            <Layer listening={false}>
-              <Rect
-                x={marquee.x}
-                y={marquee.y}
-                width={marquee.w}
-                height={marquee.h}
-                fill="#4a9eda18"
-                stroke="#4a9eda"
-                strokeWidth={1 / viewport.scale}
-                dash={[6 / viewport.scale, 4 / viewport.scale]}
-              />
+        <ErrorBoundary onReset={handleNew}>
+          <Stage
+            ref={stageRef}
+            width={dimensions.width}
+            height={dimensions.height}
+            draggable={tool === 'pan'}
+            x={viewport.x}
+            y={viewport.y}
+            scaleX={viewport.scale}
+            scaleY={viewport.scale}
+            onDragEnd={(e) => { if (e.target === e.target.getStage()) setViewport(v => ({ ...v, x: e.target.x(), y: e.target.y() })) }}
+            onWheel={handleWheel}
+            onClick={handleStageClick}
+            style={{ cursor: tool === 'pan' ? 'grab' : 'default' }}
+          >
+            {/* Base grid */}
+            <Layer>
+              <Rect x={0} y={0} width={GRID_PX} height={GRID_PX} fill={BG_COLOR} listening={false} />
+              <Grid />
             </Layer>
-          )}
-        </Stage>
+
+            {/* One Konva Layer per UI layer, bottom-to-top */}
+            {layersReversed.map(layer => {
+              const isActive  = layer.id === selectedId
+              const isVisible = isActive || layer.visible
+              if (!isVisible) return null
+              const opacity   = isActive ? 1 : 0.15
+              const layerObjs = objects.filter(o => o.layerId === layer.id)
+
+              return (
+                <Layer key={layer.id} opacity={opacity} listening={isActive}>
+                  {layerObjs.map(obj => (
+                    <BuildingObject
+                      key={obj.id}
+                      obj={obj}
+                      isSelected={selectedObjIds.has(obj.id)}
+                      canDrag={tool === 'pointer'}
+                      onPointerDown={(e) => {
+                        if (tool !== 'pointer') return
+                        e.cancelBubble = true
+                        if (e.evt.shiftKey) {
+                          // Shift-click: toggle this object in/out of selection
+                          setSelectedObjIds(prev => {
+                            const next = new Set(prev)
+                            if (next.has(obj.id)) next.delete(obj.id)
+                            else next.add(obj.id)
+                            return next
+                          })
+                        } else if (!selectedObjIds.has(obj.id)) {
+                          // Normal click on unselected object: select only it
+                          setSelectedObjIds(new Set([obj.id]))
+                        }
+                        // Normal click on already-selected object: keep selection (allows drag)
+                      }}
+                      onDragStart={(e) => handleObjDragStart(e, obj.id)}
+                      onDragMove={(e)  => handleObjDragMove(e, obj.id)}
+                      onDragEnd={(e)   => handleObjDragEnd(e, obj.id)}
+                    />
+                  ))}
+                </Layer>
+              )
+            })}
+
+            {/* Marquee selection rectangle */}
+            {marquee && (
+              <Layer listening={false}>
+                <Rect
+                  x={marquee.x}
+                  y={marquee.y}
+                  width={marquee.w}
+                  height={marquee.h}
+                  fill="#4a9eda18"
+                  stroke="#4a9eda"
+                  strokeWidth={1 / viewport.scale}
+                  dash={[6 / viewport.scale, 4 / viewport.scale]}
+                />
+              </Layer>
+            )}
+          </Stage>
+        </ErrorBoundary>
       </div>
 
       <CoordHUD position={viewport} scale={viewport.scale} stageWidth={dimensions.width} stageHeight={dimensions.height} />

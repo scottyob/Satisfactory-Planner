@@ -2,7 +2,56 @@ import { useState, useEffect } from 'react'
 import { PANEL_WIDTH, CELL_SIZE } from './constants'
 import BUILDINGS from './buildings.js'
 
-const BUILDINGS_HEIGHT = 192
+const BUILDINGS_HEIGHT = 240
+
+// ─── Connectors data ─────────────────────────────────────────────────────────
+
+const CONNECTORS = [
+  {
+    key: 'floor_input',
+    label: 'Floor Input',
+    color: '#4a9eda',
+    w: 4,
+    h: 4,
+    inputs: [],
+    outputs: [{ type: 'belt', position: { side: 'east', offset: 0 } }],
+  },
+  {
+    key: 'floor_output',
+    label: 'Floor Output',
+    color: '#e8a013',
+    w: 4,
+    h: 4,
+    inputs: [{ type: 'belt', position: { side: 'east', offset: 0 } }],
+    outputs: [],
+  },
+  {
+    key: 'splitter',
+    label: 'Splitter',
+    color: '#7aabcc',
+    w: 2,
+    h: 2,
+    inputs: [{ type: 'belt', position: { side: 'south', offset: 0 } }],
+    outputs: [
+      { type: 'belt', position: { side: 'north', offset: -1 } },
+      { type: 'belt', position: { side: 'north', offset: 1 } },
+    ],
+  },
+  {
+    key: 'merger',
+    label: 'Merger',
+    color: '#7aabcc',
+    w: 2,
+    h: 2,
+    inputs: [
+      { type: 'belt', position: { side: 'south', offset: -1 } },
+      { type: 'belt', position: { side: 'south', offset: 1 } },
+    ],
+    outputs: [{ type: 'belt', position: { side: 'north', offset: 0 } }],
+  },
+]
+
+export const CONNECTORS_BY_KEY = Object.fromEntries(CONNECTORS.map(c => [c.key, c]))
 
 // ─── Layer state hook ────────────────────────────────────────────────────────
 
@@ -211,11 +260,11 @@ function LayerItem({ layer, isSelected, onSelect, onToggleVisible, onRename, dra
 
 // ─── Buildings tab ───────────────────────────────────────────────────────────
 
-function BuildingCard({ def, onAdd }) {
+function BuildingListItem({ def, onAdd }) {
   const [hovered, setHovered] = useState(false)
-  const scale = 28 / Math.max(def.w, def.h)
-  const pw = def.w * scale   // preview pixel width
-  const ph = def.h * scale   // preview pixel height
+  const scale = 20 / Math.max(def.w, def.h)
+  const pw = def.w * scale
+  const ph = def.h * scale
 
   return (
     <div
@@ -225,20 +274,18 @@ function BuildingCard({ def, onAdd }) {
       onMouseLeave={() => setHovered(false)}
       style={{
         display: 'flex',
-        flexDirection: 'column',
         alignItems: 'center',
-        gap: 4,
-        padding: '8px 6px',
-        borderRadius: 6,
-        border: `1px solid ${hovered ? def.color : '#1e3a54'}`,
-        background: hovered ? '#0f2030' : '#0a1825',
+        gap: 10,
+        padding: '8px 10px',
+        borderRadius: 4,
+        border: `1px solid ${hovered ? def.color : 'transparent'}`,
+        background: hovered ? '#0f2030' : 'transparent',
         cursor: 'pointer',
-        width: 68,
         transition: 'all 0.12s',
         userSelect: 'none',
       }}
     >
-      {/* Mini building preview */}
+      {/* Mini building preview icon */}
       <div style={{
         width: pw,
         height: ph,
@@ -248,16 +295,28 @@ function BuildingCard({ def, onAdd }) {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
+        flexShrink: 0,
       }}>
-        <span style={{ fontSize: 7, color: def.color, fontFamily: 'monospace', fontWeight: 'bold', textAlign: 'center', lineHeight: 1 }}>
+        <span style={{ fontSize: 6, color: def.color, fontFamily: 'monospace', fontWeight: 'bold', textAlign: 'center', lineHeight: 1 }}>
           {def.label.slice(0, 4).toUpperCase()}
         </span>
       </div>
 
-      <span style={{ fontSize: 10, color: '#7aabcc', fontFamily: 'monospace', textAlign: 'center', lineHeight: 1.2 }}>
+      <span style={{
+        flex: 1,
+        fontSize: 12,
+        color: hovered ? '#c8dff0' : '#7aabcc',
+        fontFamily: 'monospace',
+      }}>
         {def.label}
       </span>
-      <span style={{ fontSize: 9, color: '#2e5f8a', fontFamily: 'monospace' }}>
+
+      <span style={{
+        fontSize: 10,
+        color: '#2e5f8a',
+        fontFamily: 'monospace',
+        flexShrink: 0,
+      }}>
         {def.w} × {def.h}
       </span>
     </div>
@@ -266,9 +325,19 @@ function BuildingCard({ def, onAdd }) {
 
 function BuildingsTab({ onAddBuilding }) {
   return (
-    <div style={{ padding: 8, display: 'flex', flexWrap: 'wrap', gap: 6, alignContent: 'flex-start' }}>
+    <div style={{ padding: '4px 0', display: 'flex', flexDirection: 'column' }}>
       {BUILDINGS.map(def => (
-        <BuildingCard key={def.key} def={def} onAdd={onAddBuilding} />
+        <BuildingListItem key={def.key} def={def} onAdd={onAddBuilding} />
+      ))}
+    </div>
+  )
+}
+
+function ConnectorsTab({ onAddBuilding }) {
+  return (
+    <div style={{ padding: '4px 0', display: 'flex', flexDirection: 'column' }}>
+      {CONNECTORS.map(def => (
+        <BuildingListItem key={def.key} def={def} onAdd={onAddBuilding} />
       ))}
     </div>
   )
@@ -276,7 +345,10 @@ function BuildingsTab({ onAddBuilding }) {
 
 // ─── Main panel ──────────────────────────────────────────────────────────────
 
-const TABS = [{ id: 'buildings', label: 'Buildings' }]
+const TABS = [
+  { id: 'buildings', label: 'Buildings' },
+  { id: 'connectors', label: 'Connectors' },
+]
 
 export default function LayersPanel({
   layers, selectedId, onSelect, onToggleVisible, onRename, onAdd, onReorder, onAddBuilding,
@@ -445,6 +517,9 @@ export default function LayersPanel({
         <div style={{ flex: 1, overflowY: 'auto' }}>
           {activeTab === 'buildings' && (
             <BuildingsTab onAddBuilding={onAddBuilding} />
+          )}
+          {activeTab === 'connectors' && (
+            <ConnectorsTab onAddBuilding={onAddBuilding} />
           )}
         </div>
       </div>
