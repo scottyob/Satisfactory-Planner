@@ -222,11 +222,14 @@ export default function App() {
     setObjects(prev => prev.map(o => o.id === id ? { ...o, x, y } : o))
   }, [])
 
-  const handleObjDragMove = useCallback((e) => {
+  const handleObjDragMove = useCallback((e, id) => {
     const node = e.target
-    node.x(snap(node.x()))
-    node.y(snap(node.y()))
-  }, [])
+    const x = snap(node.x())
+    const y = snap(node.y())
+    node.x(x)
+    node.y(y)
+    updateObjPos(id, x, y)
+  }, [updateObjPos])
 
   const handleObjDragEnd = useCallback((e, id) => {
     const node = e.target
@@ -256,7 +259,7 @@ export default function App() {
           y={viewport.y}
           scaleX={viewport.scale}
           scaleY={viewport.scale}
-          onDragEnd={(e) => setViewport(v => ({ ...v, x: e.target.x(), y: e.target.y() }))}
+          onDragEnd={(e) => { if (e.target === e.target.getStage()) setViewport(v => ({ ...v, x: e.target.x(), y: e.target.y() })) }}
           onWheel={handleWheel}
           onClick={handleStageClick}
           style={{ cursor: tool === 'pan' ? 'grab' : 'default' }}
@@ -289,7 +292,7 @@ export default function App() {
                         setSelectedObjId(obj.id)
                       }
                     }}
-                    onDragMove={handleObjDragMove}
+                    onDragMove={(e) => handleObjDragMove(e, obj.id)}
                     onDragEnd={(e) => handleObjDragEnd(e, obj.id)}
                   />
                 ))}
