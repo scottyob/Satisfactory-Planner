@@ -6,17 +6,19 @@ const BUILDINGS_HEIGHT = 192
 
 // ─── Layer state hook ────────────────────────────────────────────────────────
 
-let _nextLayerId = 2
+let _nextLayerId  = 2
+let _nextFloorNum = 2
 
 export function useLayers() {
   const [layers, setLayers] = useState([
-    { id: 1, name: 'Layer 1', visible: true },
+    { id: 1, name: 'Floor 1', visible: true },
   ])
   const [selectedId, setSelectedId] = useState(1)
 
   const addLayer = () => {
-    const id = _nextLayerId++
-    setLayers(prev => [{ id, name: `Layer ${id}`, visible: false }, ...prev])
+    const id  = _nextLayerId++
+    const num = _nextFloorNum++
+    setLayers(prev => [{ id, name: `Floor ${num}`, visible: false }, ...prev])
     setSelectedId(id)
   }
 
@@ -74,7 +76,6 @@ function LayerItem({ layer, isSelected, onSelect, onToggleVisible, onRename, dra
   }
 
   const handleDoubleClick = () => {
-    onSelect(layer.id)
     setDraft(layer.name)
     setEditing(true)
   }
@@ -83,6 +84,7 @@ function LayerItem({ layer, isSelected, onSelect, onToggleVisible, onRename, dra
     <div
       draggable
       {...dragHandlers(layer.id)}
+      onClick={() => onSelect(layer.id)}
       onDoubleClick={handleDoubleClick}
       style={{
         display: 'flex',
