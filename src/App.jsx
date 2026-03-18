@@ -79,7 +79,9 @@ export default function App() {
   const objectsRef            = useRef([])
   const dragStartPositionsRef = useRef(null)
   const marqueeStartRef       = useRef(null)
+  const marqueeRef            = useRef(null)   // mirrors marquee state for event handler access
   const wasDraggingMarqueeRef = useRef(false)
+  const toolRef               = useRef('pointer')
 
   const [tool, setTool] = useState('pointer')
 
@@ -105,6 +107,7 @@ export default function App() {
   viewportRef.current       = viewport
   selectedObjIdsRef.current = selectedObjIds
   objectsRef.current        = objects
+  toolRef.current           = tool
 
   // Resize
   useEffect(() => {
@@ -299,68 +302,90 @@ export default function App() {
     if (e.target === e.target.getStage()) setSelectedObjIds(new Set())
   }, [])
 
-  // ── Marquee selection ─────────────────────────────────────────────────────
+  // ── Marquee selection (native DOM events — more reliable than Konva synthetic) ──
 
-  const handleStageMouseDown = useCallback((e) => {
-    if (tool !== 'pointer' || e.evt.button !== 0) return
-    const pos = stageRef.current.getPointerPosition()
-    const vp = viewportRef.current
-    marqueeStartRef.current = {
-      cx: (pos.x - vp.x) / vp.scale,
-      cy: (pos.y - vp.y) / vp.scale,
+  useEffect(() => {
+    const container = stageRef.current?.container()
+    if (!container) return
+
+    // Convert client coordinates to canvas (world) coordinates
+    const toCanvas = (clientX, clientY) => {
+      const rect = container.getBoundingClientRect()
+      const vp   = viewportRef.current
+      return {
+        x: (clientX - rect.left  - vp.x) / vp.scale,
+        y: (clientY - rect.top - vp.y) / vp.scale,
+      }
     }
-    wasDraggingMarqueeRef.current = false
-  }, [tool])
 
-  const handleStageMouseMove = useCallback(() => {
-    if (!marqueeStartRef.current) return
-    const pos = stageRef.current.getPointerPosition()
-    const vp = viewportRef.current
-    const cx = (pos.x - vp.x) / vp.scale
-    const cy = (pos.y - vp.y) / vp.scale
-    const { cx: sx, cy: sy } = marqueeStartRef.current
-    const w = Math.abs(cx - sx)
-    const h = Math.abs(cy - sy)
-    if (w > 4 || h > 4) {
-      wasDraggingMarqueeRef.current = true
-      setMarquee({ x: Math.min(sx, cx), y: Math.min(sy, cy), w, h })
+    const onMouseDown = (e) => {
+      if (e.button !== 0 || toolRef.current !== 'pointer') return
+      // Only start marquee when clicking empty canvas, not a building
+      const rect = container.getBoundingClientRect()
+      const hit  = stageRef.current.getIntersection({ x: e.clientX - rect.left, y: e.clientY - rect.top })
+      if (hit) return
+      const { x, y } = toCanvas(e.clientX, e.clientY)
+      marqueeStartRef.current       = { cx: x, cy: y }
+      wasDraggingMarqueeRef.current = false
     }
-  }, [])
 
-  const handleStageMouseUp = useCallback(() => {
-    if (!marqueeStartRef.current) return
-    const start = marqueeStartRef.current
-    marqueeStartRef.current = null
+    const onMouseMove = (e) => {
+      if (!marqueeStartRef.current) return
+      const { x, y }           = toCanvas(e.clientX, e.clientY)
+      const { cx: sx, cy: sy } = marqueeStartRef.current
+      const w = Math.abs(x - sx)
+      const h = Math.abs(y - sy)
+      if (w > 4 || h > 4) {
+        wasDraggingMarqueeRef.current = true
+        const m = { x: Math.min(sx, x), y: Math.min(sy, y), w, h }
+        marqueeRef.current = m
+        setMarquee(m)
+      }
+    }
 
-    if (!wasDraggingMarqueeRef.current) {
+    const onMouseUp = (e) => {
+      if (e.button !== 0 || !marqueeStartRef.current) return
+      marqueeStartRef.current = null
+
+      // Use marqueeRef (not wasDraggingMarqueeRef) as the gate — Konva fires its
+      // synthetic click via pointerup (before mouseup bubbles to window), which
+      // triggers handleStageClick and resets wasDraggingMarqueeRef to false before
+      // we get here.  marqueeRef is only ever cleared here, so it's reliable.
+      const m = marqueeRef.current
+      marqueeRef.current = null
       setMarquee(null)
-      return
+
+      if (!m) return
+
+      // Re-arm wasDraggingMarqueeRef so handleStageClick (if it fires after us
+      // via the native click event) still suppresses the stage-background deselect.
+      wasDraggingMarqueeRef.current = true
+
+      // Select all buildings that overlap the final marquee rect
+      const selected = new Set(
+        objectsRef.current
+          .filter(obj => {
+            const def = BUILDINGS_BY_KEY[obj.type]
+            if (!def) return false
+            const hw = def.w * CELL_SIZE / 2
+            const hh = def.h * CELL_SIZE / 2
+            return obj.x - hw < m.x + m.w && obj.x + hw > m.x &&
+                   obj.y - hh < m.y + m.h && obj.y + hh > m.y
+          })
+          .map(o => o.id)
+      )
+      setSelectedObjIds(selected)
     }
 
-    const pos = stageRef.current.getPointerPosition()
-    const vp = viewportRef.current
-    const endX = (pos.x - vp.x) / vp.scale
-    const endY = (pos.y - vp.y) / vp.scale
-    const mx = Math.min(start.cx, endX)
-    const my = Math.min(start.cy, endY)
-    const mw = Math.abs(endX - start.cx)
-    const mh = Math.abs(endY - start.cy)
-
-    const selected = new Set(
-      objectsRef.current
-        .filter(obj => {
-          const def = BUILDINGS_BY_KEY[obj.type]
-          if (!def) return false
-          const hw = def.w * CELL_SIZE / 2
-          const hh = def.h * CELL_SIZE / 2
-          return obj.x - hw < mx + mw && obj.x + hw > mx &&
-                 obj.y - hh < my + mh && obj.y + hh > my
-        })
-        .map(o => o.id)
-    )
-    setSelectedObjIds(selected)
-    setMarquee(null)
-  }, [])
+    container.addEventListener('mousedown', onMouseDown)
+    window.addEventListener('mousemove', onMouseMove)
+    window.addEventListener('mouseup', onMouseUp)
+    return () => {
+      container.removeEventListener('mousedown', onMouseDown)
+      window.removeEventListener('mousemove', onMouseMove)
+      window.removeEventListener('mouseup', onMouseUp)
+    }
+  }, [])  // stable — all state accessed via refs
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -383,9 +408,6 @@ export default function App() {
           onDragEnd={(e) => { if (e.target === e.target.getStage()) setViewport(v => ({ ...v, x: e.target.x(), y: e.target.y() })) }}
           onWheel={handleWheel}
           onClick={handleStageClick}
-          onMouseDown={handleStageMouseDown}
-          onMouseMove={handleStageMouseMove}
-          onMouseUp={handleStageMouseUp}
           style={{ cursor: tool === 'pan' ? 'grab' : 'default' }}
         >
           {/* Base grid */}
