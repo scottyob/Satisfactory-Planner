@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { PANEL_WIDTH, TOOLBAR_HEIGHT } from './constants'
 
 function PanIcon({ active }) {
@@ -26,7 +27,75 @@ const TOOLS = [
   { id: 'pointer', label: 'Select', shortcut: 'V', Icon: PointerIcon },
 ]
 
-export default function Toolbar({ tool, onToolChange }) {
+const btnStyle = {
+  display: 'flex', alignItems: 'center', gap: 6,
+  background: 'transparent', border: '1px solid transparent',
+  borderRadius: 5, color: '#7aabcc', cursor: 'pointer',
+  fontFamily: 'monospace', fontSize: 12, padding: '4px 10px',
+  height: 30, transition: 'all 0.1s',
+}
+
+function EditableTitle({ fileName, onRename }) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft]     = useState('')
+  const inputRef              = useRef(null)
+
+  const start = () => {
+    setDraft(fileName ?? 'factory.json')
+    setEditing(true)
+  }
+
+  useEffect(() => {
+    if (editing) inputRef.current?.select()
+  }, [editing])
+
+  const commit = () => {
+    const name = draft.trim() || (fileName ?? 'factory.json')
+    onRename(name.endsWith('.json') ? name : name + '.json')
+    setEditing(false)
+  }
+
+  const onKeyDown = (e) => {
+    if (e.key === 'Enter')  commit()
+    if (e.key === 'Escape') setEditing(false)
+  }
+
+  const baseStyle = {
+    fontFamily: 'monospace', fontSize: 11, letterSpacing: '0.08em',
+    marginRight: 10, userSelect: 'none',
+  }
+
+  if (editing) {
+    return (
+      <input
+        ref={inputRef}
+        value={draft}
+        onChange={e => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={onKeyDown}
+        style={{
+          ...baseStyle,
+          background: '#0d1b2a', border: '1px solid #2e5f8a', borderRadius: 3,
+          color: '#c8dff0', outline: 'none', padding: '2px 6px',
+          width: Math.max(120, draft.length * 7) + 'px',
+          userSelect: 'text',
+        }}
+      />
+    )
+  }
+
+  return (
+    <span
+      style={{ ...baseStyle, color: '#2e5f8a', cursor: 'text' }}
+      onDoubleClick={start}
+      title="Double-click to rename"
+    >
+      {fileName ?? 'SATISFACTORY PLANNER'}
+    </span>
+  )
+}
+
+export default function Toolbar({ tool, onToolChange, fileName, onRename, onSave, onLoad }) {
   return (
     <div
       style={{
@@ -44,16 +113,7 @@ export default function Toolbar({ tool, onToolChange }) {
         zIndex: 20,
       }}
     >
-      <span style={{
-        color: '#2e5f8a',
-        fontFamily: 'monospace',
-        fontSize: 11,
-        letterSpacing: '0.08em',
-        marginRight: 10,
-        userSelect: 'none',
-      }}>
-        SATISFACTORY PLANNER
-      </span>
+      <EditableTitle fileName={fileName} onRename={onRename} />
 
       <div style={{ width: 1, height: 24, background: '#1e3a54', margin: '0 8px' }} />
 
@@ -65,19 +125,10 @@ export default function Toolbar({ tool, onToolChange }) {
             onClick={() => onToolChange(id)}
             title={`${label} (${shortcut})`}
             style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
+              ...btnStyle,
               background: active ? '#1a3a5c' : 'transparent',
               border: active ? '1px solid #2e5f8a' : '1px solid transparent',
-              borderRadius: 5,
               color: active ? '#c8dff0' : '#7aabcc',
-              cursor: 'pointer',
-              fontFamily: 'monospace',
-              fontSize: 12,
-              padding: '4px 10px',
-              height: 30,
-              transition: 'all 0.1s',
             }}
           >
             <Icon active={active} />
@@ -88,6 +139,15 @@ export default function Toolbar({ tool, onToolChange }) {
           </button>
         )
       })}
+
+      <div style={{ width: 1, height: 24, background: '#1e3a54', margin: '0 8px' }} />
+
+      <button style={btnStyle} onClick={onSave} title="Save factory to file">
+        Save
+      </button>
+      <button style={btnStyle} onClick={onLoad} title="Load factory from file">
+        Load
+      </button>
     </div>
   )
 }

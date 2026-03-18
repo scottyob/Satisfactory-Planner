@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { PANEL_WIDTH, CELL_SIZE } from './constants'
 import BUILDINGS from './buildings.js'
 
@@ -9,11 +9,33 @@ const BUILDINGS_HEIGHT = 192
 let _nextLayerId  = 2
 let _nextFloorNum = 2
 
+const LAYER_KEY = 'sp-layers'
+
+function loadLayerState() {
+  try {
+    const saved = localStorage.getItem(LAYER_KEY)
+    if (saved) {
+      const parsed = JSON.parse(saved)
+      _nextLayerId  = parsed.nextLayerId  ?? _nextLayerId
+      _nextFloorNum = parsed.nextFloorNum ?? _nextFloorNum
+      return { layers: parsed.layers, selectedId: parsed.selectedId }
+    }
+  } catch {}
+  return null
+}
+
 export function useLayers() {
-  const [layers, setLayers] = useState([
+  const initial = loadLayerState()
+  const [layers, setLayers] = useState(initial?.layers ?? [
     { id: 1, name: 'Floor 1', visible: true },
   ])
-  const [selectedId, setSelectedId] = useState(1)
+  const [selectedId, setSelectedId] = useState(initial?.selectedId ?? 1)
+
+  useEffect(() => {
+    localStorage.setItem(LAYER_KEY, JSON.stringify({
+      layers, selectedId, nextLayerId: _nextLayerId, nextFloorNum: _nextFloorNum,
+    }))
+  }, [layers, selectedId])
 
   const addLayer = () => {
     const id  = _nextLayerId++
@@ -41,7 +63,20 @@ export function useLayers() {
     })
   }
 
-  return { layers, selectedId, addLayer, toggleVisible, renameLayer, selectLayer, reorderLayers }
+  const restoreLayerState = (newLayers, newSelectedId, nextLayerIdVal, nextFloorNumVal) => {
+    _nextLayerId  = nextLayerIdVal
+    _nextFloorNum = nextFloorNumVal
+    setLayers(newLayers)
+    setSelectedId(newSelectedId)
+  }
+
+  return {
+    layers, selectedId,
+    addLayer, toggleVisible, renameLayer, selectLayer, reorderLayers,
+    restoreLayerState,
+    _nextLayerId: () => _nextLayerId,
+    _nextFloorNum: () => _nextFloorNum,
+  }
 }
 
 // ─── Drag handle icon ────────────────────────────────────────────────────────

@@ -13,6 +13,30 @@ const AXIS_COLOR  = '#1e3a54'
 
 let _nextObjId = 1
 
+const OBJ_KEY      = 'sp-objects'
+const VIEWPORT_KEY = 'sp-viewport'
+
+function loadObjects() {
+  try {
+    const saved = localStorage.getItem(OBJ_KEY)
+    if (saved) {
+      const parsed = JSON.parse(saved)
+      _nextObjId = parsed.nextObjId ?? _nextObjId
+      return parsed.objects ?? []
+    }
+  } catch {}
+  return []
+}
+
+function loadViewport(w, h) {
+  try {
+    const saved = localStorage.getItem(VIEWPORT_KEY)
+    if (saved) return JSON.parse(saved)
+  } catch {}
+  const center = Math.floor(GRID_CELLS / 2)
+  return { scale: 1, x: w / 2 - center * CELL_SIZE, y: h / 2 - center * CELL_SIZE }
+}
+
 // ─── Grid ────────────────────────────────────────────────────────────────────
 
 function Grid() {
@@ -91,23 +115,33 @@ export default function App() {
   const [dimensions, setDimensions] = useState({ width: stageW(), height: stageH() })
 
   const center = Math.floor(GRID_CELLS / 2)
-  const [viewport, setViewport] = useState(() => ({
-    scale: 1,
-    x: stageW() / 2 - center * CELL_SIZE,
-    y: stageH() / 2 - center * CELL_SIZE,
-  }))
+  const [viewport, setViewport] = useState(() => loadViewport(stageW(), stageH()))
 
-  const { layers, selectedId, addLayer, toggleVisible, renameLayer, selectLayer, reorderLayers } = useLayers()
+  const {
+    layers, selectedId,
+    addLayer, toggleVisible, renameLayer, selectLayer, reorderLayers,
+    restoreLayerState, _nextLayerId, _nextFloorNum,
+  } = useLayers()
 
-  const [objects, setObjects]               = useState([])
+  const [objects, setObjects]               = useState(() => loadObjects())
   const [selectedObjIds, setSelectedObjIds] = useState(new Set())
   const [marquee, setMarquee]               = useState(null)
+  const [fileName, setFileName]             = useState(null)
 
   // Keep refs in sync with latest state for use in stable callbacks
   viewportRef.current       = viewport
   selectedObjIdsRef.current = selectedObjIds
   objectsRef.current        = objects
   toolRef.current           = tool
+
+  // Persist objects and viewport to localStorage
+  useEffect(() => {
+    localStorage.setItem(OBJ_KEY, JSON.stringify({ objects, nextObjId: _nextObjId }))
+  }, [objects])
+
+  useEffect(() => {
+    localStorage.setItem(VIEWPORT_KEY, JSON.stringify(viewport))
+  }, [viewport])
 
   // Resize
   useEffect(() => {
@@ -387,13 +421,66 @@ export default function App() {
     }
   }, [])  // stable — all state accessed via refs
 
+  // ── Save / Load ───────────────────────────────────────────────────────────
+
+  const handleSave = useCallback(() => {
+    const state = {
+      version: 1,
+      objects,
+      nextObjId: _nextObjId,
+      layers,
+      selectedLayerId: selectedId,
+      nextLayerId: _nextLayerId(),
+      nextFloorNum: _nextFloorNum(),
+      viewport,
+    }
+    const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' })
+    const url  = URL.createObjectURL(blob)
+    const a    = document.createElement('a')
+    a.href     = url
+    a.download = fileName ?? 'factory.json'
+    a.click()
+    URL.revokeObjectURL(url)
+  }, [objects, layers, selectedId, viewport, fileName, _nextLayerId, _nextFloorNum])
+
+  const handleLoad = useCallback(() => {
+    const input    = document.createElement('input')
+    input.type     = 'file'
+    input.accept   = '.json'
+    input.onchange = (e) => {
+      const file = e.target.files[0]
+      if (!file) return
+      const reader = new FileReader()
+      reader.onload = (ev) => {
+        try {
+          const state = JSON.parse(ev.target.result)
+          _nextObjId = state.nextObjId ?? _nextObjId
+          setObjects(state.objects ?? [])
+          setSelectedObjIds(new Set())
+          restoreLayerState(
+            state.layers ?? [{ id: 1, name: 'Floor 1', visible: true }],
+            state.selectedLayerId ?? 1,
+            state.nextLayerId ?? 2,
+            state.nextFloorNum ?? 2,
+          )
+          if (state.viewport) setViewport(state.viewport)
+          setFileName(file.name)
+        } catch {
+          console.error('Failed to load file')
+        }
+      }
+      reader.readAsText(file)
+    }
+    input.click()
+  }, [restoreLayerState])
+
   // ── Render ────────────────────────────────────────────────────────────────
 
   const layersReversed = [...layers].reverse()
 
   return (
     <div style={{ width: '100vw', height: '100vh', background: BG_COLOR }}>
-      <Toolbar tool={tool} onToolChange={setTool} />
+      <Toolbar tool={tool} onToolChange={setTool} fileName={fileName} onRename={setFileName} onSave={handleSave} onLoad={handleLoad} />
 
       <div style={{ position: 'absolute', top: TOOLBAR_HEIGHT, left: 0 }}>
         <Stage
