@@ -507,14 +507,102 @@ function FactoryStats({ objects }) {
   )
 }
 
-function InfoPanel({ obj, objects }) {
+function BeltGroupStats({ group }) {
+  const { beltIds, connTypes, sources, sinks } = group
+  const beltCount     = beltIds.size
+  const splitterCount = connTypes.splitter ?? 0
+  const mergerCount   = connTypes.merger ?? 0
+
+  // Aggregate by item
+  const feedByItem = {}
+  for (const s of sources) {
+    if (s.item) feedByItem[s.item] = (feedByItem[s.item] ?? 0) + s.rate
+  }
+  const drainByItem = {}
+  for (const s of sinks) {
+    if (s.item) drainByItem[s.item] = (drainByItem[s.item] ?? 0) + s.rate
+  }
+
+  const feedEntries  = Object.entries(feedByItem).sort((a, b) => b[1] - a[1])
+  const drainEntries = Object.entries(drainByItem).sort((a, b) => b[1] - a[1])
+  const unknownDrains = sinks.filter(s => !s.item).length
+
+  // Balance per item
+  const allItems = new Set([...Object.keys(feedByItem), ...Object.keys(drainByItem)])
+  const balances = []
+  for (const item of allItems) {
+    const diff = (feedByItem[item] ?? 0) - (drainByItem[item] ?? 0)
+    if (Math.abs(diff) > 0.01) balances.push({ item, diff })
+  }
+  const balanced = balances.length === 0
+
+  const countParts = [
+    `${beltCount} belt${beltCount !== 1 ? 's' : ''}`,
+    splitterCount > 0 && `${splitterCount} splitter${splitterCount !== 1 ? 's' : ''}`,
+    mergerCount   > 0 && `${mergerCount} merger${mergerCount !== 1 ? 's' : ''}`,
+  ].filter(Boolean).join('  ·  ')
+
+  return (
+    <div style={{ padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ color: '#4a9eda', fontFamily: 'monospace', fontSize: 10 }}>{countParts}</div>
+
+      {feedEntries.length > 0 && (
+        <div>
+          <div style={{ color: '#5ee877', fontFamily: 'monospace', fontSize: 9, fontWeight: 700, letterSpacing: 1, marginBottom: 4 }}>FEEDING IN</div>
+          {feedEntries.map(([item, rate]) => (
+            <ItemRow key={item} item={item} rate={fmtPerMin(rate)} rateColor="#5ee877" />
+          ))}
+        </div>
+      )}
+
+      {drainEntries.length > 0 && (
+        <div>
+          <div style={{ color: '#e8a013', fontFamily: 'monospace', fontSize: 9, fontWeight: 700, letterSpacing: 1, marginBottom: 4 }}>DRAINING OUT</div>
+          {drainEntries.map(([item, rate]) => (
+            <ItemRow key={item} item={item} rate={fmtPerMin(rate)} rateColor="#e8a013" />
+          ))}
+        </div>
+      )}
+
+      {unknownDrains > 0 && (
+        <div style={{ color: '#2e5f8a', fontFamily: 'monospace', fontSize: 10 }}>
+          + {unknownDrains} floor output{unknownDrains !== 1 ? 's' : ''}
+        </div>
+      )}
+
+      {feedEntries.length === 0 && drainEntries.length === 0 && unknownDrains === 0 && (
+        <span style={{ color: '#2e5f8a', fontFamily: 'monospace', fontSize: 11 }}>No connected buildings</span>
+      )}
+
+      {balanced ? (
+        <div style={{ color: '#5ee877', fontFamily: 'monospace', fontSize: 10 }}>✓ balanced</div>
+      ) : (
+        <div style={{ fontFamily: 'monospace', fontSize: 10, display: 'flex', flexDirection: 'column', gap: 2 }}>
+          {balances.map(({ item, diff }) => (
+            <span key={item} style={{ color: diff > 0 ? '#5ee877' : '#e87c7c' }}>
+              {diff > 0
+                ? `▲ +${fmtPerMin(diff)} ${item} surplus`
+                : `▼ −${fmtPerMin(Math.abs(diff))} ${item} deficit`}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function InfoPanel({ obj, selectedBeltGroup, objects, buildingErrors }) {
   const def    = obj ? (BUILDINGS_BY_KEY[obj.type] ?? CONNECTORS_BY_KEY[obj.type]) : null
   const recipe = obj?.recipeId ? RECIPES_BY_ID[obj.recipeId] : null
   const factor = obj?.clockSpeed ?? 1
   const pct    = Math.round(factor * 100)
   const fmtRate = (r) => fmtPerMin(r * factor)
 
-  const subtitle = obj ? (def?.label ?? obj.type) : 'Factory'
+  const subtitle = obj
+    ? (def?.label ?? obj.type)
+    : selectedBeltGroup
+    ? 'Belt Group'
+    : 'Factory'
 
   return (
     <div style={{ borderTop: '1px solid #1e3a54', flexShrink: 0, display: 'flex', flexDirection: 'column' }}>
@@ -527,8 +615,11 @@ function InfoPanel({ obj, objects }) {
         <span style={{ color: '#4a9eda', fontFamily: 'monospace', fontSize: 10 }}>{subtitle}</span>
       </div>
 
-      {/* No building selected — factory stats */}
-      {!obj && <FactoryStats objects={objects} />}
+      {/* No building, no belt selected — factory stats */}
+      {!obj && !selectedBeltGroup && <FactoryStats objects={objects} />}
+
+      {/* Single belt selected — belt group stats */}
+      {!obj && selectedBeltGroup && <BeltGroupStats group={selectedBeltGroup} />}
 
       {/* Building selected */}
       {obj && (
@@ -575,6 +666,34 @@ function InfoPanel({ obj, objects }) {
           ) : obj.type !== 'floor_input' && BUILDINGS_BY_KEY[obj.type] && (
             <span style={{ color: '#2e5f8a', fontFamily: 'monospace', fontSize: 11 }}>No recipe configured</span>
           )}
+
+          {/* Alarm callout — bottom of info */}
+          {buildingErrors?.has(obj.id) && (
+            <div style={{
+              marginTop: 4,
+              background: '#2a0a0a',
+              border: '1px solid #c0392b',
+              borderLeft: '3px solid #e87c7c',
+              borderRadius: 4,
+              padding: '8px 10px',
+              display: 'flex',
+              gap: 8,
+              alignItems: 'flex-start',
+            }}>
+              {/* Warning icon */}
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0, marginTop: 1 }}>
+                <path d="M8 1.5L14.5 13H1.5L8 1.5Z" fill="#c0392b" stroke="#e87c7c" strokeWidth="1" strokeLinejoin="round" />
+                <rect x="7.25" y="5.5" width="1.5" height="4" rx="0.75" fill="#ffaaaa" />
+                <rect x="7.25" y="10.5" width="1.5" height="1.5" rx="0.75" fill="#ffaaaa" />
+              </svg>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
+                <span style={{ color: '#e87c7c', fontFamily: 'monospace', fontSize: 9, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase' }}>Alarm</span>
+                {buildingErrors.get(obj.id).map((reason, i) => (
+                  <span key={i} style={{ color: '#ffaaaa', fontFamily: 'monospace', fontSize: 10, lineHeight: 1.4 }}>{reason}</span>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -590,7 +709,7 @@ const TABS = [
 
 export default function LayersPanel({
   layers, selectedId, onSelect, onToggleVisible, onRename, onAdd, onDelete, onReorder, onAddBuilding,
-  selectedObj, objects,
+  selectedObj, objects, selectedBeltGroup, buildingErrors,
 }) {
   const [dragId, setDragId]     = useState(null)
   const [dragOverId, setDragOverId] = useState(null)
@@ -718,7 +837,7 @@ export default function LayersPanel({
       {/* ── Info panel — centered in free space ── */}
       <div style={{ flex: 1, display: 'flex', alignItems: 'center', padding: '12px 0' }}>
         <div style={{ width: '100%' }}>
-          <InfoPanel obj={selectedObj} objects={objects} />
+          <InfoPanel obj={selectedObj} selectedBeltGroup={selectedBeltGroup} objects={objects} buildingErrors={buildingErrors} />
         </div>
       </div>
 

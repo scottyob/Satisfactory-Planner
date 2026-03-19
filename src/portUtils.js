@@ -1,8 +1,85 @@
 import { CELL_SIZE } from './constants'
 import { BUILDINGS_BY_KEY } from './buildings'
 import { CONNECTORS_BY_KEY } from './LayersPanel'
+import { RECIPES_BY_ID } from './recipes'
 
 export const ALL_BUILDINGS_BY_KEY = { ...BUILDINGS_BY_KEY, ...CONNECTORS_BY_KEY }
+
+// ─── Belt group BFS ───────────────────────────────────────────────────────────
+
+const PASS_THROUGH = new Set(['connection_point', 'splitter', 'merger'])
+
+/**
+ * BFS from one belt, expanding through pass-through connectors.
+ * Returns { beltIds, connectorIds, connTypes, sources, sinks }
+ */
+export function computeBeltGroup(startBeltId, belts, objects) {
+  const startBelt = belts.find(b => b.id === startBeltId)
+  if (!startBelt) return null
+
+  const objsById = Object.fromEntries(objects.map(o => [o.id, o]))
+
+  const visitedBeltIds = new Set([startBeltId])
+  const visitedConnIds = new Set()
+  const queue = [startBelt]
+
+  let i = 0
+  while (i < queue.length) {
+    const belt = queue[i++]
+
+    for (const endObjId of [belt.toObjId, belt.fromObjId]) {
+      const endObj = objsById[endObjId]
+      if (!endObj || !PASS_THROUGH.has(endObj.type) || visitedConnIds.has(endObj.id)) continue
+      visitedConnIds.add(endObj.id)
+      for (const b of belts) {
+        if ((b.fromObjId === endObj.id || b.toObjId === endObj.id) && !visitedBeltIds.has(b.id)) {
+          visitedBeltIds.add(b.id)
+          queue.push(b)
+        }
+      }
+    }
+  }
+
+  // Tally connector types
+  const connTypes = {}
+  for (const connId of visitedConnIds) {
+    const obj = objsById[connId]
+    if (obj) connTypes[obj.type] = (connTypes[obj.type] ?? 0) + 1
+  }
+
+  // Compute sources and sinks
+  const sources = []
+  const sinks   = []
+
+  for (const beltId of visitedBeltIds) {
+    const belt    = belts.find(b => b.id === beltId)
+    if (!belt) continue
+    const fromObj = objsById[belt.fromObjId]
+    const toObj   = objsById[belt.toObjId]
+
+    if (fromObj && !PASS_THROUGH.has(fromObj.type)) {
+      if (BUILDINGS_BY_KEY[fromObj.type] && fromObj.recipeId) {
+        const recipe = RECIPES_BY_ID[fromObj.recipeId]
+        const out    = recipe?.outputs[belt.fromPortIdx]
+        if (out) sources.push({ item: out.item, rate: out.perMin * (fromObj.clockSpeed ?? 1) })
+      } else if (fromObj.type === 'floor_input' && fromObj.item) {
+        sources.push({ item: fromObj.item, rate: fromObj.ratePerMin ?? 60 })
+      }
+    }
+
+    if (toObj && !PASS_THROUGH.has(toObj.type)) {
+      if (BUILDINGS_BY_KEY[toObj.type] && toObj.recipeId) {
+        const recipe = RECIPES_BY_ID[toObj.recipeId]
+        const inp    = recipe?.inputs[belt.toPortIdx]
+        if (inp) sinks.push({ item: inp.item, rate: inp.perMin * (toObj.clockSpeed ?? 1) })
+      } else if (toObj.type === 'floor_output') {
+        sinks.push({ item: null, rate: 0 })
+      }
+    }
+  }
+
+  return { beltIds: visitedBeltIds, connectorIds: visitedConnIds, connTypes, sources, sinks }
+}
 
 /**
  * Compute the world-space position of a port's attachment point (edge center).

@@ -10,7 +10,7 @@ const CHEVRON_COLOR = '#e8a013'
 const BELT_H        = CELL_SIZE * 2  // total height of belt rect
 const CHEVRON_SPEED = 0.08           // px per animation frame
 
-export default function BeltObject({ belt, objects, isSelected, onMouseDown, onDblClick }) {
+export default function BeltObject({ belt, objects, isSelected, onMouseDown, onDblClick, onBeltHover, onBeltLeave }) {
   const offsetRef = useRef(0)
   const shapeRef  = useRef(null)
 
@@ -67,6 +67,8 @@ export default function BeltObject({ belt, objects, isSelected, onMouseDown, onD
         cornerRadius={2}
         onMouseDown={onMouseDown}
         onDblClick={onDblClick}
+        onMouseEnter={onBeltHover}
+        onMouseLeave={onBeltLeave}
         listening={true}
       />
 

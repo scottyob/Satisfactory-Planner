@@ -1,4 +1,4 @@
-import { useRef, useState, useEffect } from 'react'
+import { useRef, useState, useEffect, useCallback } from 'react'
 import { Group, Rect, Text, Circle, Line, Image as KonvaImage } from 'react-konva'
 import { CELL_SIZE } from './constants'
 import { ALL_BUILDINGS_BY_KEY } from './portUtils'
@@ -335,14 +335,26 @@ function RecipeContent({ obj, pw, ph, hw, hh, color }) {
 
 const DBLCLICK_MS = 300
 
+function usePulse(active) {
+  const [phase, setPhase] = useState(0)
+  useEffect(() => {
+    if (!active) { setPhase(0); return }
+    const start = Date.now()
+    const id = setInterval(() => setPhase((Date.now() - start) / 1000), 50)
+    return () => clearInterval(id)
+  }, [active])
+  return active ? 0.35 + 0.65 * (Math.sin(phase * Math.PI * 2) * 0.5 + 0.5) : 0
+}
+
 export default function BuildingObject({
-  obj, isSelected, canDrag,
+  obj, isSelected, isError, errorReasons, canDrag,
   onPointerDown, onDragStart, onDragMove, onDragEnd,
   onPortMouseDown, occupiedOutputs, occupiedInputs, pendingBeltType,
-  onDblClick,
+  onDblClick, onShowTooltip, onHideTooltip,
 }) {
   const lastClickRef  = useRef(0)
   const cancelDragRef = useRef(false)
+  const pulseOpacity  = usePulse(!!isError)
 
   const def   = ALL_BUILDINGS_BY_KEY[obj.type]
   if (!def) return null
@@ -440,6 +452,19 @@ export default function BuildingObject({
         cornerRadius={2}
       />
 
+      {/* Error border overlay — pulsing red */}
+      {isError && (
+        <Rect
+          x={-hw} y={-hh} width={pw} height={ph}
+          fill="transparent"
+          stroke="#e87c7c"
+          strokeWidth={2.5}
+          cornerRadius={2}
+          opacity={pulseOpacity}
+          listening={false}
+        />
+      )}
+
       {/* Label or floor_input/recipe content */}
       {obj.type === 'floor_input' ? (
         <FloorInputContent obj={obj} pw={pw} ph={ph} hw={hw} hh={hh} color={color} />
@@ -482,6 +507,30 @@ export default function BuildingObject({
           onPortMouseDown={onPortMouseDown}
         />
       ))}
+
+      {/* Error indicator — pulsing red circle, half floating off top-right corner */}
+      {isError && (
+        <Group
+          x={hw} y={-hh}
+          listening={true}
+          onMouseEnter={() => {
+            const content = [
+              { text: '⚠ Alarm', color: '#e87c7c' },
+              ...(errorReasons ?? []).map(r => ({ text: `• ${r}`, color: '#ffaaaa' })),
+            ]
+            onShowTooltip?.(content)
+          }}
+          onMouseLeave={() => onHideTooltip?.()}
+        >
+          <Circle radius={20} fill="#c0392b" opacity={pulseOpacity} />
+          <Text
+            x={-20} y={-20} width={40} height={40}
+            text="!" align="center" verticalAlign="middle"
+            fontSize={24} fontFamily="monospace" fontStyle="bold"
+            fill="white" opacity={pulseOpacity} listening={false}
+          />
+        </Group>
+      )}
     </Group>
   )
 }

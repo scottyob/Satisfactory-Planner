@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef, Component } from 'react'
+import { useState, useCallback, useEffect, useRef, useMemo, Component } from 'react'
 import { Stage, Layer, Line, Rect } from 'react-konva'
 import { CELL_SIZE, GRID_CELLS, GRID_PX, PANEL_WIDTH, TOOLBAR_HEIGHT } from './constants'
 import Toolbar from './Toolbar.jsx'
@@ -7,8 +7,9 @@ import BuildingObject from './BuildingObject.jsx'
 import FloorInputModal from './FloorInputModal.jsx'
 import RecipeModal from './RecipeModal.jsx'
 import { BUILDINGS_BY_KEY } from './buildings.js'
+import { RECIPES_BY_ID } from './recipes.js'
 import BeltObject from './BeltObject.jsx'
-import { ALL_BUILDINGS_BY_KEY, getPortWorldPos, findNearestInputPort } from './portUtils.js'
+import { ALL_BUILDINGS_BY_KEY, getPortWorldPos, findNearestInputPort, computeBeltGroup } from './portUtils.js'
 
 // Error boundary to catch rendering errors and reset state
 class ErrorBoundary extends Component {
@@ -153,6 +154,8 @@ export default function App() {
   const selectedIdRef         = useRef(1)
   const beltDragStartRef      = useRef(null)  // { beltId, wx, wy } — potential split drag
   const beltSplitDragRef      = useRef(null)  // { cpId } — actively dragging a split CP
+  const mousePosRef           = useRef({ x: 0, y: 0 })
+  const tooltipElRef          = useRef(null)
 
   const [tool, setTool] = useState('pointer')
 
@@ -179,6 +182,7 @@ export default function App() {
   const [fileName, setFileName]             = useState(null)
   const [floorInputModal, setFloorInputModal] = useState({ open: false, objId: null })
   const [recipeModal,     setRecipeModal]     = useState({ open: false, objId: null })
+  const [tooltip, setTooltip]                 = useState(null) // { x, y, content: [{text,color}] } | null
 
   // Keep refs in sync with latest state for use in stable callbacks
   viewportRef.current       = viewport
@@ -277,6 +281,63 @@ export default function App() {
       window.removeEventListener('mousemove', onMouseMove)
       window.removeEventListener('mouseup', onMouseUp)
     }
+  }, [])
+
+  // ── Tooltip ───────────────────────────────────────────────────────────────
+
+  // Track raw mouse position for tooltip placement — update DOM directly to avoid re-renders
+  useEffect(() => {
+    const onMove = (e) => {
+      mousePosRef.current = { x: e.clientX, y: e.clientY }
+      if (tooltipElRef.current) {
+        tooltipElRef.current.style.left = `${e.clientX + 14}px`
+        tooltipElRef.current.style.top  = `${e.clientY - 10}px`
+      }
+    }
+    window.addEventListener('mousemove', onMove)
+    return () => window.removeEventListener('mousemove', onMove)
+  }, [])
+
+  const showTooltip = useCallback((content) => {
+    const { x, y } = mousePosRef.current
+    setTooltip({ x, y, content })
+  }, [])
+
+  const hideTooltip = useCallback(() => setTooltip(null), [])
+
+  const handleBeltHover = useCallback((beltId) => {
+    const group = computeBeltGroup(beltId, beltsRef.current, objectsRef.current)
+    if (!group) { setTooltip(null); return }
+
+    const fmt = (v) => (v % 1 === 0 ? String(v) : v.toFixed(1)) + '/min'
+    const feedByItem = {}, drainByItem = {}
+    for (const s of group.sources) {
+      if (s.item) feedByItem[s.item] = (feedByItem[s.item] ?? 0) + s.rate
+    }
+    for (const s of group.sinks) {
+      if (s.item) drainByItem[s.item] = (drainByItem[s.item] ?? 0) + s.rate
+    }
+
+    const allItems = [...new Set([...Object.keys(feedByItem), ...Object.keys(drainByItem)])]
+    const content = []
+    allItems.forEach((item, idx) => {
+      if (idx > 0) content.push({ text: '', color: '' })
+      const feed = feedByItem[item] ?? 0
+      const drain = drainByItem[item] ?? 0
+      const diff = feed - drain
+      content.push({ text: item, color: '#c8dff0' })
+      content.push({ text: `  ${fmt(feed)} in  ·  ${fmt(drain)} out`, color: '#7aabcc' })
+      content.push(Math.abs(diff) < 0.01
+        ? { text: '  ✓ balanced', color: '#5ee877' }
+        : diff > 0
+          ? { text: `  ▲ +${fmt(diff)} surplus`, color: '#5ee877' }
+          : { text: `  ▼ −${fmt(Math.abs(diff))} deficit`, color: '#e87c7c' }
+      )
+    })
+    if (content.length === 0) content.push({ text: 'No items connected', color: '#2e5f8a' })
+
+    const { x, y } = mousePosRef.current
+    setTooltip({ x, y, content })
   }, [])
 
   // ── Zoom ──────────────────────────────────────────────────────────────────
@@ -744,6 +805,51 @@ export default function App() {
     input.click()
   }, [restoreLayerState, handleNew])
 
+  // ── Error detection ───────────────────────────────────────────────────────
+
+  const buildingErrors = useMemo(() => {
+    const fmt = (v) => (v % 1 === 0 ? String(v) : v.toFixed(1)) + '/min'
+    const errors = new Map() // id → string[]
+    const beltsByToObj = {}
+    for (const b of belts) {
+      if (!beltsByToObj[b.toObjId]) beltsByToObj[b.toObjId] = new Set()
+      beltsByToObj[b.toObjId].add(b.toPortIdx)
+    }
+    for (const obj of objects) {
+      if (!BUILDINGS_BY_KEY[obj.type] || !obj.recipeId) continue
+      const recipe = RECIPES_BY_ID[obj.recipeId]
+      if (!recipe || recipe.inputs.length === 0) continue
+      const connected = beltsByToObj[obj.id] ?? new Set()
+      const reasons = []
+      for (let portIdx = 0; portIdx < recipe.inputs.length; portIdx++) {
+        const inp = recipe.inputs[portIdx]
+        if (!connected.has(portIdx)) {
+          reasons.push(`${inp.item} input not connected`)
+        } else {
+          const belt = belts.find(b => b.toObjId === obj.id && b.toPortIdx === portIdx)
+          if (belt) {
+            const group = computeBeltGroup(belt.id, belts, objects)
+            if (group) {
+              const feedByItem = {}, drainByItem = {}
+              for (const s of group.sources) {
+                if (s.item) feedByItem[s.item] = (feedByItem[s.item] ?? 0) + s.rate
+              }
+              for (const s of group.sinks) {
+                if (s.item) drainByItem[s.item] = (drainByItem[s.item] ?? 0) + s.rate
+              }
+              for (const item of Object.keys(drainByItem)) {
+                const diff = (feedByItem[item] ?? 0) - drainByItem[item]
+                if (diff < -0.01) reasons.push(`${item}: ${fmt(Math.abs(diff))} deficit`)
+              }
+            }
+          }
+        }
+      }
+      if (reasons.length > 0) errors.set(obj.id, reasons)
+    }
+    return errors
+  }, [objects, belts])
+
   // ── Render ────────────────────────────────────────────────────────────────
 
   const layersReversed = [...layers].reverse()
@@ -804,6 +910,8 @@ export default function App() {
                       isSelected={selectedBeltIds.has(belt.id)}
                       onMouseDown={(e) => handleBeltMouseDown(e, belt.id)}
                       onDblClick={(e) => handleBeltDblClick(e, belt.id)}
+                      onBeltHover={() => handleBeltHover(belt.id)}
+                      onBeltLeave={hideTooltip}
                     />
                   ))}
 
@@ -812,6 +920,10 @@ export default function App() {
                       key={obj.id}
                       obj={obj}
                       isSelected={selectedObjIds.has(obj.id)}
+                      isError={buildingErrors.has(obj.id)}
+                      errorReasons={buildingErrors.get(obj.id) ?? []}
+                      onShowTooltip={showTooltip}
+                      onHideTooltip={hideTooltip}
                       canDrag={tool === 'pointer'}
                       onDblClick={
                         obj.type === 'floor_input'
@@ -895,6 +1007,10 @@ export default function App() {
           ? objects.find(o => o.id === [...selectedObjIds][0]) ?? null
           : null}
         objects={objects}
+        selectedBeltGroup={selectedBeltIds.size === 1
+          ? computeBeltGroup([...selectedBeltIds][0], belts, objects)
+          : null}
+        buildingErrors={buildingErrors}
       />
 
       <FloorInputModal
@@ -918,6 +1034,31 @@ export default function App() {
           />
         )
       })()}
+
+      {/* Tooltip */}
+      {tooltip && (
+        <div
+          ref={el => { tooltipElRef.current = el }}
+          style={{
+            position: 'fixed',
+            left: tooltip.x + 14,
+            top: tooltip.y - 10,
+            background: '#0a1520',
+            border: '1px solid #1e3a54',
+            borderRadius: 4,
+            padding: '6px 10px',
+            pointerEvents: 'none',
+            zIndex: 200,
+            boxShadow: '0 2px 12px #00000066',
+          }}
+        >
+          {tooltip.content.map((line, i) =>
+            line.text === ''
+              ? <div key={i} style={{ height: 5 }} />
+              : <div key={i} style={{ color: line.color, fontFamily: 'monospace', fontSize: 11, whiteSpace: 'nowrap' }}>{line.text}</div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
