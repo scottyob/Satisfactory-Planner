@@ -32,7 +32,7 @@ function ConnectorMarker({ type, position, isInput, hw, hh }) {
     const arrowHalfWidth = CELL_SIZE * 0.15  // Arrow half-width (thinner arrows)
     const gap = CELL_SIZE * 0.2           // Gap between arrows
     const totalArrowWidth = arrowHalfWidth * 2 * 4 + gap * 3  // 4 arrows + 3 gaps
-    const startX = -(totalArrowWidth / 2) + arrowHalfWidth  // Start from first arrow center
+    const startX = (CONN_SIZE - totalArrowWidth) / 2 + arrowHalfWidth  // Start from first arrow center
 
     if (side === 'south') {
       x = ox - hs
@@ -58,14 +58,14 @@ function ConnectorMarker({ type, position, isInput, hw, hh }) {
       const depthPadding = (CONN_DEPTH - arrowDepth) / 2
       if (side === 'south' || side === 'north') {
         const tipY = isInput
-          ? (side === 'south' ? CONN_DEPTH - depthPadding : depthPadding)
-          : (side === 'south' ? depthPadding : CONN_DEPTH - depthPadding)
+          ? (side === 'south' ? depthPadding : CONN_DEPTH - depthPadding)
+          : (side === 'south' ? CONN_DEPTH - depthPadding : depthPadding)
         const baseY = tipY - arrowDir * arrowDepth
         points = [pos, tipY, pos - arrowHalfWidth, baseY, pos + arrowHalfWidth, baseY]
       } else {
         const tipX = isInput
-          ? (side === 'east' ? CONN_DEPTH - depthPadding : depthPadding)
-          : (side === 'east' ? depthPadding : CONN_DEPTH - depthPadding)
+          ? (side === 'east' ? depthPadding : CONN_DEPTH - depthPadding)
+          : (side === 'east' ? CONN_DEPTH - depthPadding : depthPadding)
         const baseX = tipX - arrowDir * arrowDepth
         points = [tipX, pos, baseX, pos - arrowHalfWidth, baseX, pos + arrowHalfWidth]
       }
