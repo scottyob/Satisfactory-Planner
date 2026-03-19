@@ -3,8 +3,6 @@ import { PANEL_WIDTH, CELL_SIZE } from './constants'
 import BUILDINGS, { BUILDINGS_BY_KEY } from './buildings.js'
 import { RECIPES_BY_ID } from './recipes.js'
 
-const BUILDINGS_HEIGHT = 240
-
 // ─── Connectors data ─────────────────────────────────────────────────────────
 
 const CONNECTORS = [
@@ -411,90 +409,174 @@ function ItemRow({ item, rate, rateColor }) {
   )
 }
 
-function InfoPanel({ obj }) {
-  if (!obj) return null
+function fmtMW(mw) {
+  if (mw >= 1000) return (mw / 1000).toFixed(2).replace(/\.?0+$/, '') + ' GW'
+  return (mw % 1 === 0 ? mw : mw.toFixed(1)) + ' MW'
+}
 
-  const def    = BUILDINGS_BY_KEY[obj.type] ?? CONNECTORS_BY_KEY[obj.type]
-  const recipe = obj.recipeId ? RECIPES_BY_ID[obj.recipeId] : null
-  const factor = obj.clockSpeed ?? 1
-  const pct    = Math.round(factor * 100)
-  const fmtRate = (r) => {
-    const v = r * factor
-    return (v % 1 === 0 ? String(v) : v.toFixed(2).replace(/\.?0+$/, '')) + '/min'
+function fmtPerMin(v) {
+  return (v % 1 === 0 ? String(v) : v.toFixed(2).replace(/\.?0+$/, '')) + '/min'
+}
+
+function FactoryStats({ objects }) {
+  // Total power across all production buildings
+  const totalPower = objects.reduce((sum, o) => {
+    const def = BUILDINGS_BY_KEY[o.type]
+    if (!def?.power) return sum
+    return sum + def.power * Math.pow(o.clockSpeed ?? 1, 1.6)
+  }, 0)
+
+  // Building counts
+  const prodObjs      = objects.filter(o => BUILDINGS_BY_KEY[o.type])
+  const configured    = prodObjs.filter(o => o.recipeId)
+  const unconfigured  = prodObjs.length - configured.length
+
+  // Net output per item (outputs minus inputs, across all configured buildings)
+  const net = {}
+  for (const o of configured) {
+    const recipe = RECIPES_BY_ID[o.recipeId]
+    if (!recipe) continue
+    const factor = o.clockSpeed ?? 1
+    for (const out of recipe.outputs) {
+      net[out.item] = (net[out.item] ?? 0) + out.perMin * factor
+    }
+    for (const inp of recipe.inputs) {
+      net[inp.item] = (net[inp.item] ?? 0) - inp.perMin * factor
+    }
   }
 
+  // Split into produced (positive net) and consumed (negative net)
+  const produced  = Object.entries(net).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1])
+  const consumed  = Object.entries(net).filter(([, v]) => v < 0).sort((a, b) => a[1] - b[1])
+
+  const statRow = (label, value, color = '#c8dff0') => (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', padding: '2px 0' }}>
+      <span style={{ color: '#7aabcc', fontFamily: 'monospace', fontSize: 10 }}>{label}</span>
+      <span style={{ color, fontFamily: 'monospace', fontSize: 11, fontWeight: 600 }}>{value}</span>
+    </div>
+  )
+
   return (
-    <div style={{
-      borderTop: '1px solid #1e3a54',
-      flexShrink: 0,
-      display: 'flex', flexDirection: 'column',
-    }}>
+    <div style={{ padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {/* Power */}
+      <div>
+        <div style={{ color: '#7aabcc', fontFamily: 'monospace', fontSize: 9, fontWeight: 700, letterSpacing: 1, marginBottom: 4 }}>POWER</div>
+        {statRow('Total draw', '⚡ ' + fmtMW(totalPower), '#f4d03f')}
+      </div>
+
+      {/* Buildings */}
+      <div>
+        <div style={{ color: '#7aabcc', fontFamily: 'monospace', fontSize: 9, fontWeight: 700, letterSpacing: 1, marginBottom: 4 }}>BUILDINGS</div>
+        {statRow('Production', prodObjs.length)}
+        {statRow('Configured', configured.length, '#5ee877')}
+        {unconfigured > 0 && statRow('Unconfigured', unconfigured, '#e87c7c')}
+      </div>
+
+      {/* Net outputs */}
+      {produced.length > 0 && (
+        <div>
+          <div style={{ color: '#e8a013', fontFamily: 'monospace', fontSize: 9, fontWeight: 700, letterSpacing: 1, marginBottom: 4 }}>OUTPUTS</div>
+          {produced.map(([item, rate]) => (
+            <div key={item} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '2px 0' }}>
+              <ItemIcon item={item} size={18} />
+              <span style={{ color: '#7aabcc', fontFamily: 'monospace', fontSize: 10, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item}</span>
+              <span style={{ color: '#e8a013', fontFamily: 'monospace', fontSize: 10, fontWeight: 600, flexShrink: 0 }}>{fmtPerMin(rate)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Net consumed (items with negative net = more consumed than produced) */}
+      {consumed.length > 0 && (
+        <div>
+          <div style={{ color: '#5ee877', fontFamily: 'monospace', fontSize: 9, fontWeight: 700, letterSpacing: 1, marginBottom: 4 }}>INPUTS</div>
+          {consumed.map(([item, rate]) => (
+            <div key={item} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '2px 0' }}>
+              <ItemIcon item={item} size={18} />
+              <span style={{ color: '#7aabcc', fontFamily: 'monospace', fontSize: 10, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item}</span>
+              <span style={{ color: '#5ee877', fontFamily: 'monospace', fontSize: 10, fontWeight: 600, flexShrink: 0 }}>{fmtPerMin(Math.abs(rate))}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {prodObjs.length === 0 && (
+        <span style={{ color: '#2e5f8a', fontFamily: 'monospace', fontSize: 11 }}>No buildings placed</span>
+      )}
+    </div>
+  )
+}
+
+function InfoPanel({ obj, objects }) {
+  const def    = obj ? (BUILDINGS_BY_KEY[obj.type] ?? CONNECTORS_BY_KEY[obj.type]) : null
+  const recipe = obj?.recipeId ? RECIPES_BY_ID[obj.recipeId] : null
+  const factor = obj?.clockSpeed ?? 1
+  const pct    = Math.round(factor * 100)
+  const fmtRate = (r) => fmtPerMin(r * factor)
+
+  const subtitle = obj ? (def?.label ?? obj.type) : 'Factory'
+
+  return (
+    <div style={{ borderTop: '1px solid #1e3a54', flexShrink: 0, display: 'flex', flexDirection: 'column' }}>
       {/* Header */}
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '8px 12px 6px',
-        borderBottom: '1px solid #1e3a54',
+        padding: '8px 12px 6px', borderBottom: '1px solid #1e3a54',
       }}>
-        <span style={{
-          color: '#7aabcc', fontFamily: 'monospace', fontSize: 11,
-          fontWeight: 'bold', letterSpacing: '0.1em', textTransform: 'uppercase',
-        }}>Info</span>
-        <span style={{ color: '#4a9eda', fontFamily: 'monospace', fontSize: 10 }}>
-          {def?.label ?? obj.type}
-        </span>
+        <span style={{ color: '#7aabcc', fontFamily: 'monospace', fontSize: 11, fontWeight: 'bold', letterSpacing: '0.1em', textTransform: 'uppercase' }}>Info</span>
+        <span style={{ color: '#4a9eda', fontFamily: 'monospace', fontSize: 10 }}>{subtitle}</span>
       </div>
 
-      <div style={{ padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: 6 }}>
-        {/* Size */}
-        {def && (
-          <div style={{ color: '#3a6a8a', fontFamily: 'monospace', fontSize: 10 }}>
-            {def.w} × {def.h} cells
-          </div>
-        )}
+      {/* No building selected — factory stats */}
+      {!obj && <FactoryStats objects={objects} />}
 
-        {/* Floor input info */}
-        {obj.type === 'floor_input' && obj.item && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      {/* Building selected */}
+      {obj && (
+        <div style={{ padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {/* Size + power */}
+          {def && (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span style={{ color: '#3a6a8a', fontFamily: 'monospace', fontSize: 10 }}>{def.w} × {def.h} cells</span>
+              {def.power != null && (
+                <span style={{ color: '#f4d03f', fontFamily: 'monospace', fontSize: 11, fontWeight: 600 }}>
+                  ⚡ {fmtMW(def.power * Math.pow(factor, 1.6))}
+                </span>
+              )}
+            </div>
+          )}
+
+          {/* Floor input info */}
+          {obj.type === 'floor_input' && obj.item && (
             <ItemRow item={obj.item} rate={`${obj.ratePerMin ?? 60}/min`} rateColor="#4a9eda" />
-          </div>
-        )}
+          )}
 
-        {/* Recipe info */}
-        {recipe ? (
-          <>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-              <span style={{ color: '#c8dff0', fontFamily: 'monospace', fontSize: 12, fontWeight: 600 }}>{recipe.name}</span>
-              <span style={{ color: pct === 100 ? '#3a6a8a' : '#e8a013', fontFamily: 'monospace', fontSize: 11 }}>{pct}%</span>
-            </div>
-
-            <div style={{ display: 'flex', gap: 8 }}>
-              {/* Inputs */}
-              <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-                <div style={{ color: '#5ee877', fontSize: 9, fontFamily: 'monospace', fontWeight: 700, letterSpacing: 1, marginBottom: 2 }}>INPUTS</div>
-                {recipe.inputs.length === 0
-                  ? <span style={{ color: '#3a5a7a', fontSize: 10, fontFamily: 'monospace' }}>—</span>
-                  : recipe.inputs.map((inp, i) => (
-                    <ItemRow key={i} item={inp.item} rate={fmtRate(inp.perMin)} rateColor="#5ee877" />
-                  ))
-                }
+          {/* Recipe info */}
+          {recipe ? (
+            <>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                <span style={{ color: '#c8dff0', fontFamily: 'monospace', fontSize: 12, fontWeight: 600 }}>{recipe.name}</span>
+                <span style={{ color: pct === 100 ? '#3a6a8a' : '#e8a013', fontFamily: 'monospace', fontSize: 11 }}>{pct}%</span>
               </div>
-
-              {/* Arrow */}
-              <div style={{ color: '#4a9eda', fontSize: 18, paddingTop: 16, flexShrink: 0 }}>→</div>
-
-              {/* Outputs */}
-              <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-                <div style={{ color: '#e8a013', fontSize: 9, fontFamily: 'monospace', fontWeight: 700, letterSpacing: 1, marginBottom: 2 }}>OUTPUTS</div>
-                {recipe.outputs.map((out, i) => (
-                  <ItemRow key={i} item={out.item} rate={fmtRate(out.perMin)} rateColor="#e8a013" />
-                ))}
+              <div style={{ display: 'flex', gap: 8 }}>
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+                  <div style={{ color: '#5ee877', fontSize: 9, fontFamily: 'monospace', fontWeight: 700, letterSpacing: 1, marginBottom: 2 }}>INPUTS</div>
+                  {recipe.inputs.length === 0
+                    ? <span style={{ color: '#3a5a7a', fontSize: 10, fontFamily: 'monospace' }}>—</span>
+                    : recipe.inputs.map((inp, i) => <ItemRow key={i} item={inp.item} rate={fmtRate(inp.perMin)} rateColor="#5ee877" />)
+                  }
+                </div>
+                <div style={{ color: '#4a9eda', fontSize: 18, paddingTop: 16, flexShrink: 0 }}>→</div>
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+                  <div style={{ color: '#e8a013', fontSize: 9, fontFamily: 'monospace', fontWeight: 700, letterSpacing: 1, marginBottom: 2 }}>OUTPUTS</div>
+                  {recipe.outputs.map((out, i) => <ItemRow key={i} item={out.item} rate={fmtRate(out.perMin)} rateColor="#e8a013" />)}
+                </div>
               </div>
-            </div>
-          </>
-        ) : obj.type !== 'floor_input' && BUILDINGS_BY_KEY[obj.type] && (
-          <span style={{ color: '#2e5f8a', fontFamily: 'monospace', fontSize: 11 }}>No recipe configured</span>
-        )}
-      </div>
+            </>
+          ) : obj.type !== 'floor_input' && BUILDINGS_BY_KEY[obj.type] && (
+            <span style={{ color: '#2e5f8a', fontFamily: 'monospace', fontSize: 11 }}>No recipe configured</span>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -508,7 +590,7 @@ const TABS = [
 
 export default function LayersPanel({
   layers, selectedId, onSelect, onToggleVisible, onRename, onAdd, onDelete, onReorder, onAddBuilding,
-  selectedObj,
+  selectedObj, objects,
 }) {
   const [dragId, setDragId]     = useState(null)
   const [dragOverId, setDragOverId] = useState(null)
@@ -598,9 +680,10 @@ export default function LayersPanel({
         </button>
       </div>
 
-      {/* ── Layer list ── */}
+      {/* ── Floor list ── */}
       <div style={{
-        flex: 1,
+        flex: '0 0 auto',
+        maxHeight: 160,
         overflowY: 'auto',
         padding: '4px 6px',
         display: 'flex',
@@ -632,12 +715,15 @@ export default function LayersPanel({
         ))}
       </div>
 
-      {/* ── Info panel ── */}
-      <InfoPanel obj={selectedObj} />
+      {/* ── Info panel — centered in free space ── */}
+      <div style={{ flex: 1, display: 'flex', alignItems: 'center', padding: '12px 0' }}>
+        <div style={{ width: '100%' }}>
+          <InfoPanel obj={selectedObj} objects={objects} />
+        </div>
+      </div>
 
       {/* ── Bottom tab panel ── */}
       <div style={{
-        height: BUILDINGS_HEIGHT,
         borderTop: '1px solid #1e3a54',
         display: 'flex',
         flexDirection: 'column',
@@ -676,7 +762,7 @@ export default function LayersPanel({
         </div>
 
         {/* Tab content */}
-        <div style={{ flex: 1, overflowY: 'auto' }}>
+        <div style={{ overflowY: 'auto' }}>
           {activeTab === 'buildings' && (
             <BuildingsTab onAddBuilding={onAddBuilding} />
           )}

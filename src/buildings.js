@@ -7,6 +7,8 @@
 //   color     – hex color for canvas rendering
 //   w         – width in grid cells (foundations)
 //   h         – height in grid cells (foundations)
+//   power     – base power consumption in MW at 100% clock speed
+//               actual = power × clockSpeed^1.6  (Satisfactory formula)
 //   inputs    – [{ type, position }]   type: 'belt' | 'pipe'
 //   outputs   – [{ type, position }]   type: 'belt' | 'pipe'
 //
@@ -22,8 +24,7 @@ const BUILDINGS = [
     key:    'smelter',
     label:  'Smelter',
     color:  '#e87c13',
-    w: 5,
-    h: 9,
+    w: 5, h: 9, power: 4,
     inputs: [
       { type: 'belt', position: { side: 'south', offset: 0 } },
     ],
@@ -36,8 +37,7 @@ const BUILDINGS = [
     key:    'foundry',
     label:  'Foundry',
     color:  '#c06a10',
-    w: 10,
-    h: 9,
+    w: 10, h: 9, power: 16,
     inputs: [
       { type: 'belt', position: { side: 'south', offset: -2 } },
       { type: 'belt', position: { side: 'south', offset:  2 } },
@@ -51,8 +51,7 @@ const BUILDINGS = [
     key:    'constructor',
     label:  'Constructor',
     color:  '#e87c13',
-    w: 8,
-    h: 10,
+    w: 8, h: 10, power: 4,
     inputs: [
       { type: 'belt', position: { side: 'south', offset: 0 } },
     ],
@@ -65,8 +64,7 @@ const BUILDINGS = [
     key:    'assembler',
     label:  'Assembler',
     color:  '#4a9eda',
-    w: 10,
-    h: 15,
+    w: 10, h: 15, power: 15,
     inputs: [
       { type: 'belt', position: { side: 'south', offset: -2 } },
       { type: 'belt', position: { side: 'south', offset:  2 } },
@@ -80,8 +78,7 @@ const BUILDINGS = [
     key:    'manufacturer',
     label:  'Manufacturer',
     color:  '#3a7abf',
-    w: 18,
-    h: 20,
+    w: 18, h: 20, power: 55,
     inputs: [
       { type: 'belt', position: { side: 'south', offset: -6 } },
       { type: 'belt', position: { side: 'south', offset: -2 } },
@@ -97,8 +94,7 @@ const BUILDINGS = [
     key:    'refinery',
     label:  'Refinery',
     color:  '#2a9d8f',
-    w: 10,
-    h: 20,
+    w: 10, h: 20, power: 30,
     inputs: [
       { type: 'belt', position: { side: 'south', offset: -2 } },
       { type: 'pipe', position: { side: 'south', offset:  2 } },
@@ -113,8 +109,7 @@ const BUILDINGS = [
     key:    'blender',
     label:  'Blender',
     color:  '#21867a',
-    w: 18,
-    h: 16,
+    w: 18, h: 16, power: 75,
     inputs: [
       { type: 'belt', position: { side: 'south', offset: -6 } },
       { type: 'belt', position: { side: 'south', offset: -2 } },
@@ -131,8 +126,7 @@ const BUILDINGS = [
     key:    'packager',
     label:  'Packager',
     color:  '#e9c46a',
-    w: 8,
-    h: 8,
+    w: 8, h: 8, power: 10,
     inputs: [
       { type: 'belt', position: { side: 'south', offset: -1 } },
       { type: 'pipe', position: { side: 'south', offset:  1 } },
@@ -147,8 +141,7 @@ const BUILDINGS = [
     key:    'particleAccelerator',
     label:  'Part. Accel.',
     color:  '#9b5de5',
-    w: 26,
-    h: 38,
+    w: 26, h: 38, power: 500,   // varies 250–1500 MW by recipe
     inputs: [
       { type: 'belt', position: { side: 'south', offset: -8 } },
       { type: 'belt', position: { side: 'south', offset:  0 } },
@@ -163,8 +156,7 @@ const BUILDINGS = [
     key:    'quantumEncoder',
     label:  'Quantum Enc.',
     color:  '#7b2d8b',
-    w: 20,
-    h: 20,
+    w: 20, h: 20, power: 1000,
     inputs: [
       { type: 'belt', position: { side: 'south', offset: -6 } },
       { type: 'belt', position: { side: 'south', offset: -2 } },
@@ -181,8 +173,7 @@ const BUILDINGS = [
     key:    'converter',
     label:  'Converter',
     color:  '#f4a261',
-    w: 10,
-    h: 10,
+    w: 10, h: 10, power: 100,
     inputs: [
       { type: 'belt', position: { side: 'south', offset: -2 } },
       { type: 'belt', position: { side: 'south', offset:  2 } },

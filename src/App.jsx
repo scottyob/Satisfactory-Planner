@@ -894,6 +894,7 @@ export default function App() {
         selectedObj={selectedObjIds.size === 1
           ? objects.find(o => o.id === [...selectedObjIds][0]) ?? null
           : null}
+        objects={objects}
       />
 
       <FloorInputModal
