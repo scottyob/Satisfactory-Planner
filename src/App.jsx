@@ -4,7 +4,8 @@ import { CELL_SIZE, GRID_CELLS, GRID_PX, PANEL_WIDTH, TOOLBAR_HEIGHT } from './c
 import Toolbar from './Toolbar.jsx'
 import LayersPanel, { useLayers } from './LayersPanel.jsx'
 import BuildingObject from './BuildingObject.jsx'
-import { BUILDINGS_BY_KEY } from './buildings.js'
+import BeltObject from './BeltObject.jsx'
+import { ALL_BUILDINGS_BY_KEY, getPortWorldPos, findNearestInputPort } from './portUtils.js'
 
 // Error boundary to catch rendering errors and reset state
 class ErrorBoundary extends Component {
@@ -35,10 +36,12 @@ const MINOR_COLOR = '#141e28'
 const MAJOR_COLOR = '#1a2a38'
 const AXIS_COLOR  = '#1e3a54'
 
-let _nextObjId = 1
+let _nextObjId  = 1
+let _nextBeltId = 1
 
 const OBJ_KEY      = 'sp-objects'
 const VIEWPORT_KEY = 'sp-viewport'
+const BELTS_KEY    = 'sp-belts'
 
 function loadObjects() {
   try {
@@ -47,6 +50,18 @@ function loadObjects() {
       const parsed = JSON.parse(saved)
       _nextObjId = parsed.nextObjId ?? _nextObjId
       return parsed.objects ?? []
+    }
+  } catch {}
+  return []
+}
+
+function loadBelts() {
+  try {
+    const saved = localStorage.getItem(BELTS_KEY)
+    if (saved) {
+      const parsed = JSON.parse(saved)
+      _nextBeltId = parsed.nextBeltId ?? _nextBeltId
+      return parsed.belts ?? []
     }
   } catch {}
   return []
@@ -130,6 +145,9 @@ export default function App() {
   const marqueeRef            = useRef(null)   // mirrors marquee state for event handler access
   const wasDraggingMarqueeRef = useRef(false)
   const toolRef               = useRef('pointer')
+  const beltsRef              = useRef([])
+  const pendingBeltRef        = useRef(null)
+  const selectedIdRef         = useRef(1)
 
   const [tool, setTool] = useState('pointer')
 
@@ -148,7 +166,10 @@ export default function App() {
   } = useLayers()
 
   const [objects, setObjects]               = useState(() => loadObjects())
+  const [belts, setBelts]                   = useState(() => loadBelts())
   const [selectedObjIds, setSelectedObjIds] = useState(new Set())
+  const [selectedBeltIds, setSelectedBeltIds] = useState(new Set())
+  const [pendingBelt, setPendingBelt]       = useState(null)
   const [marquee, setMarquee]               = useState(null)
   const [fileName, setFileName]             = useState(null)
 
@@ -157,11 +178,18 @@ export default function App() {
   selectedObjIdsRef.current = selectedObjIds
   objectsRef.current        = objects
   toolRef.current           = tool
+  beltsRef.current          = belts
+  pendingBeltRef.current    = pendingBelt
+  selectedIdRef.current     = selectedId
 
-  // Persist objects and viewport to localStorage
+  // Persist objects, belts, and viewport to localStorage
   useEffect(() => {
     localStorage.setItem(OBJ_KEY, JSON.stringify({ objects, nextObjId: _nextObjId }))
   }, [objects])
+
+  useEffect(() => {
+    localStorage.setItem(BELTS_KEY, JSON.stringify({ belts, nextBeltId: _nextBeltId }))
+  }, [belts])
 
   useEffect(() => {
     localStorage.setItem(VIEWPORT_KEY, JSON.stringify(viewport))
@@ -180,11 +208,24 @@ export default function App() {
       if (e.target.tagName === 'INPUT') return
       if (e.key === 'h' || e.key === 'H') setTool('pan')
       if (e.key === 'v' || e.key === 'V') setTool('pointer')
-      if (e.key === 'Escape') setSelectedObjIds(new Set())
-      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedObjIdsRef.current.size > 0) {
-        const ids = selectedObjIdsRef.current
-        setObjects(prev => prev.filter(o => !ids.has(o.id)))
+      if (e.key === 'Escape') {
         setSelectedObjIds(new Set())
+        setSelectedBeltIds(new Set())
+        setPendingBelt(null)
+      }
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (selectedObjIdsRef.current.size > 0) {
+          const ids = selectedObjIdsRef.current
+          setObjects(prev => prev.filter(o => !ids.has(o.id)))
+          // Remove belts connected to deleted objects
+          setBelts(prev => prev.filter(b => !ids.has(b.fromObjId) && !ids.has(b.toObjId)))
+          setSelectedObjIds(new Set())
+        }
+        if (selectedBeltIds.size > 0) {
+          const ids = selectedBeltIds
+          setBelts(prev => prev.filter(b => !ids.has(b.id)))
+          setSelectedBeltIds(new Set())
+        }
       }
       if ((e.key === 'r' || e.key === 'R') &&
           draggingObjRef.current !== null &&
@@ -198,7 +239,7 @@ export default function App() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [])
+  }, [selectedBeltIds])
 
   // Middle mouse pan (works regardless of active tool)
   useEffect(() => {
@@ -296,7 +337,6 @@ export default function App() {
 
   const handleObjDragStart = useCallback((e, id) => {
     draggingObjRef.current = id
-    // Capture start positions for the dragged object + all co-selected objects
     const sel = selectedObjIdsRef.current
     const toTrack = sel.has(id) ? sel : new Set([id])
     dragStartPositionsRef.current = new Map(
@@ -313,10 +353,9 @@ export default function App() {
     node.x(x)
     node.y(y)
 
-    const starts = dragStartPositionsRef.current
+    const starts   = dragStartPositionsRef.current
     const startPos = starts?.get(id)
     if (startPos && starts.size > 1) {
-      // Move all co-selected objects by the same delta
       const dx = x - startPos.x
       const dy = y - startPos.y
       setObjects(prev => prev.map(o => {
@@ -335,7 +374,7 @@ export default function App() {
     const x = snap(node.x())
     const y = snap(node.y())
 
-    const starts = dragStartPositionsRef.current
+    const starts   = dragStartPositionsRef.current
     const startPos = starts?.get(id)
     if (startPos && starts.size > 1) {
       const dx = x - startPos.x
@@ -351,22 +390,53 @@ export default function App() {
     dragStartPositionsRef.current = null
   }, [updateObjPos])
 
+  // ── Port interaction ───────────────────────────────────────────────────────
+
+  const handlePortMouseDown = useCallback((objId, portIdx) => {
+    // Reject if port is already occupied
+    if (beltsRef.current.some(b => b.fromObjId === objId && b.fromPortIdx === portIdx)) return
+
+    const obj = objectsRef.current.find(o => o.id === objId)
+    if (!obj) return
+    const def = ALL_BUILDINGS_BY_KEY[obj.type]
+    if (!def) return
+    const portDef = def.outputs[portIdx]
+    if (!portDef) return
+
+    const pos = getPortWorldPos(obj, portDef)
+    setPendingBelt({
+      fromObjId:   objId,
+      fromPortIdx: portIdx,
+      portType:    portDef.type,
+      sx: pos.x, sy: pos.y,
+      cx: pos.x, cy: pos.y,
+    })
+  }, [])
+
+  const handleBeltMouseDown = useCallback((e, beltId) => {
+    e.cancelBubble = true
+    setSelectedObjIds(new Set())
+    setSelectedBeltIds(new Set([beltId]))
+  }, [])
+
   // Click on stage background: deselect (unless ending a marquee drag)
   const handleStageClick = useCallback((e) => {
     if (wasDraggingMarqueeRef.current) {
       wasDraggingMarqueeRef.current = false
       return
     }
-    if (e.target === e.target.getStage()) setSelectedObjIds(new Set())
+    if (e.target === e.target.getStage()) {
+      setSelectedObjIds(new Set())
+      setSelectedBeltIds(new Set())
+    }
   }, [])
 
-  // ── Marquee selection (native DOM events — more reliable than Konva synthetic) ──
+  // ── Marquee selection + pending belt (native DOM events) ──────────────────
 
   useEffect(() => {
     const container = stageRef.current?.container()
     if (!container) return
 
-    // Convert client coordinates to canvas (world) coordinates
     const toCanvas = (clientX, clientY) => {
       const rect = container.getBoundingClientRect()
       const vp   = viewportRef.current
@@ -378,7 +448,7 @@ export default function App() {
 
     const onMouseDown = (e) => {
       if (e.button !== 0 || toolRef.current !== 'pointer') return
-      // Only start marquee when clicking empty canvas, not a building
+      if (pendingBeltRef.current) return  // already drawing a belt
       const rect = container.getBoundingClientRect()
       const hit  = stageRef.current.getIntersection({ x: e.clientX - rect.left, y: e.clientY - rect.top })
       if (hit) return
@@ -388,6 +458,13 @@ export default function App() {
     }
 
     const onMouseMove = (e) => {
+      // Update pending belt cursor position
+      if (pendingBeltRef.current) {
+        const { x: wx, y: wy } = toCanvas(e.clientX, e.clientY)
+        setPendingBelt(prev => prev ? { ...prev, cx: wx, cy: wy } : null)
+        return
+      }
+
       if (!marqueeStartRef.current) return
       const { x, y }           = toCanvas(e.clientX, e.clientY)
       const { cx: sx, cy: sy } = marqueeStartRef.current
@@ -402,29 +479,64 @@ export default function App() {
     }
 
     const onMouseUp = (e) => {
-      if (e.button !== 0 || !marqueeStartRef.current) return
+      if (e.button !== 0) return
+
+      // Handle pending belt drop
+      if (pendingBeltRef.current) {
+        const { x: wx, y: wy } = toCanvas(e.clientX, e.clientY)
+        const pb      = pendingBeltRef.current
+        const layerId = selectedIdRef.current
+        const nearest = findNearestInputPort(wx, wy, objectsRef.current, layerId, pb.portType, beltsRef.current)
+
+        if (nearest) {
+          setBelts(prev => [...prev, {
+            id:          _nextBeltId++,
+            layerId,
+            fromObjId:   pb.fromObjId,
+            fromPortIdx: pb.fromPortIdx,
+            toObjId:     nearest.obj.id,
+            toPortIdx:   nearest.portIdx,
+          }])
+        } else {
+          // Drop to empty space — create a connection_point and connect to it
+          const sx = Math.round(wx / CELL_SIZE) * CELL_SIZE
+          const sy = Math.round(wy / CELL_SIZE) * CELL_SIZE
+          const cpObj = {
+            id: _nextObjId++, type: 'connection_point', layerId,
+            rotation: 0, x: sx, y: sy,
+          }
+          setObjects(prev => [...prev, cpObj])
+          setBelts(prev => [...prev, {
+            id:          _nextBeltId++,
+            layerId,
+            fromObjId:   pb.fromObjId,
+            fromPortIdx: pb.fromPortIdx,
+            toObjId:     cpObj.id,
+            toPortIdx:   0,
+          }])
+        }
+
+        setPendingBelt(null)
+        return
+      }
+
+      if (!marqueeStartRef.current) return
       marqueeStartRef.current = null
 
-      // Use marqueeRef (not wasDraggingMarqueeRef) as the gate — Konva fires its
-      // synthetic click via pointerup (before mouseup bubbles to window), which
-      // triggers handleStageClick and resets wasDraggingMarqueeRef to false before
-      // we get here.  marqueeRef is only ever cleared here, so it's reliable.
       const m = marqueeRef.current
       marqueeRef.current = null
       setMarquee(null)
 
       if (!m) return
 
-      // Re-arm wasDraggingMarqueeRef so handleStageClick (if it fires after us
-      // via the native click event) still suppresses the stage-background deselect.
       wasDraggingMarqueeRef.current = true
 
-      // Select all buildings on the ACTIVE layer that overlap the final marquee rect
+      const activeLayerId = selectedIdRef.current
       const selected = new Set(
         objectsRef.current
           .filter(obj => {
-            if (obj.layerId !== selectedId) return false  // ignore other floors
-            const def = BUILDINGS_BY_KEY[obj.type]
+            if (obj.layerId !== activeLayerId) return false
+            const def = ALL_BUILDINGS_BY_KEY[obj.type]
             if (!def) return false
             const hw = def.w * CELL_SIZE / 2
             const hh = def.h * CELL_SIZE / 2
@@ -453,6 +565,8 @@ export default function App() {
       version: 1,
       objects,
       nextObjId: _nextObjId,
+      belts,
+      nextBeltId: _nextBeltId,
       layers,
       selectedLayerId: selectedId,
       nextLayerId: _nextLayerId(),
@@ -466,12 +580,15 @@ export default function App() {
     a.download = fileName ?? 'factory.json'
     a.click()
     URL.revokeObjectURL(url)
-  }, [objects, layers, selectedId, viewport, fileName, _nextLayerId, _nextFloorNum])
+  }, [objects, belts, layers, selectedId, viewport, fileName, _nextLayerId, _nextFloorNum])
 
   const handleNew = useCallback(() => {
-    _nextObjId = 1
+    _nextObjId  = 1
+    _nextBeltId = 1
     setObjects([])
+    setBelts([])
     setSelectedObjIds(new Set())
+    setSelectedBeltIds(new Set())
     restoreLayerState(
       [{ id: 1, name: 'Floor 1', visible: true }],
       1, 2, 2,
@@ -491,9 +608,12 @@ export default function App() {
       reader.onload = (ev) => {
         try {
           const state = JSON.parse(ev.target.result)
-          _nextObjId = state.nextObjId ?? _nextObjId
+          _nextObjId  = state.nextObjId  ?? _nextObjId
+          _nextBeltId = state.nextBeltId ?? _nextBeltId
           setObjects(state.objects ?? [])
+          setBelts(state.belts ?? [])
           setSelectedObjIds(new Set())
+          setSelectedBeltIds(new Set())
           restoreLayerState(
             state.layers ?? [{ id: 1, name: 'Floor 1', visible: true }],
             state.selectedLayerId ?? 1,
@@ -515,6 +635,16 @@ export default function App() {
   // ── Render ────────────────────────────────────────────────────────────────
 
   const layersReversed = [...layers].reverse()
+
+  // Precompute occupied port sets per object for this render
+  const beltsByFromObj = {}
+  const beltsByToObj   = {}
+  for (const b of belts) {
+    if (!beltsByFromObj[b.fromObjId]) beltsByFromObj[b.fromObjId] = new Set()
+    beltsByFromObj[b.fromObjId].add(b.fromPortIdx)
+    if (!beltsByToObj[b.toObjId]) beltsByToObj[b.toObjId] = new Set()
+    beltsByToObj[b.toObjId].add(b.toPortIdx)
+  }
 
   return (
     <div style={{ width: '100vw', height: '100vh', background: BG_COLOR }}>
@@ -549,9 +679,21 @@ export default function App() {
               if (!isVisible) return null
               const opacity   = isActive ? 1 : 0.15
               const layerObjs = objects.filter(o => o.layerId === layer.id)
+              const layerBelts = belts.filter(b => b.layerId === layer.id)
 
               return (
                 <Layer key={layer.id} opacity={opacity} listening={isActive}>
+                  {/* Belts render behind buildings */}
+                  {layerBelts.map(belt => (
+                    <BeltObject
+                      key={belt.id}
+                      belt={belt}
+                      objects={objects}
+                      isSelected={selectedBeltIds.has(belt.id)}
+                      onMouseDown={(e) => handleBeltMouseDown(e, belt.id)}
+                    />
+                  ))}
+
                   {layerObjs.map(obj => (
                     <BuildingObject
                       key={obj.id}
@@ -562,7 +704,6 @@ export default function App() {
                         if (tool !== 'pointer') return
                         e.cancelBubble = true
                         if (e.evt.shiftKey) {
-                          // Shift-click: toggle this object in/out of selection
                           setSelectedObjIds(prev => {
                             const next = new Set(prev)
                             if (next.has(obj.id)) next.delete(obj.id)
@@ -570,14 +711,16 @@ export default function App() {
                             return next
                           })
                         } else if (!selectedObjIds.has(obj.id)) {
-                          // Normal click on unselected object: select only it
                           setSelectedObjIds(new Set([obj.id]))
                         }
-                        // Normal click on already-selected object: keep selection (allows drag)
                       }}
                       onDragStart={(e) => handleObjDragStart(e, obj.id)}
                       onDragMove={(e)  => handleObjDragMove(e, obj.id)}
                       onDragEnd={(e)   => handleObjDragEnd(e, obj.id)}
+                      onPortMouseDown={(portIdx) => handlePortMouseDown(obj.id, portIdx)}
+                      occupiedOutputs={beltsByFromObj[obj.id]}
+                      occupiedInputs={beltsByToObj[obj.id]}
+                      pendingBeltType={pendingBelt?.portType ?? null}
                     />
                   ))}
                 </Layer>
@@ -596,6 +739,18 @@ export default function App() {
                   stroke="#4a9eda"
                   strokeWidth={1 / viewport.scale}
                   dash={[6 / viewport.scale, 4 / viewport.scale]}
+                />
+              </Layer>
+            )}
+
+            {/* Pending belt preview — above all layers */}
+            {pendingBelt && (
+              <Layer listening={false}>
+                <Line
+                  points={[pendingBelt.sx, pendingBelt.sy, pendingBelt.cx, pendingBelt.cy]}
+                  stroke="#e8a01388"
+                  strokeWidth={CELL_SIZE * 2}
+                  lineCap="round"
                 />
               </Layer>
             )}

@@ -196,4 +196,15 @@ const BUILDINGS = [
 ]
 
 export default BUILDINGS
+
 export const BUILDINGS_BY_KEY = Object.fromEntries(BUILDINGS.map(b => [b.key, b]))
+
+// Hidden buildings — created programmatically only, not shown in the palette
+BUILDINGS_BY_KEY['connection_point'] = {
+  key:    'connection_point',
+  label:  '·',
+  color:  '#7aabcc',
+  w: 2, h: 2,
+  inputs:  [{ type: 'belt', position: { side: 'west',  offset: 0 } }],
+  outputs: [{ type: 'belt', position: { side: 'east',  offset: 0 } }],
+}

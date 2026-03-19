@@ -13,7 +13,8 @@
       "WebFetch(domain:www.satisfactorydb.com)",
       "WebFetch(domain:satisfactoryplanner.app)",
       "WebFetch(domain:factoriolab.github.io)",
-      "WebFetch(domain:www.reddit.com)"
+      "WebFetch(domain:www.reddit.com)",
+      "Bash(npm run:*)"
     ]
   }
 }
