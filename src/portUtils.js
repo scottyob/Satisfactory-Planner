@@ -9,6 +9,7 @@ export const ALL_BUILDINGS_BY_KEY = { ...BUILDINGS_BY_KEY, ...CONNECTORS_BY_KEY 
  * obj must have { x, y, rotation, type }. portDef must have { position: { side, offset } }.
  */
 export function getPortWorldPos(obj, portDef) {
+  if (obj.type === 'connection_point') return { x: obj.x, y: obj.y }
   const def = ALL_BUILDINGS_BY_KEY[obj.type]
   if (!def) return { x: obj.x, y: obj.y }
   const hw = (def.w * CELL_SIZE) / 2

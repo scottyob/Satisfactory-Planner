@@ -8,9 +8,9 @@ const BELT_BORDER   = '#3a5a7a'
 const BELT_SELECTED = '#4a9eda'
 const CHEVRON_COLOR = '#e8a013'
 const BELT_H        = CELL_SIZE * 2  // total height of belt rect
-const CHEVRON_SPEED = 1              // px per animation frame
+const CHEVRON_SPEED = 0.08           // px per animation frame
 
-export default function BeltObject({ belt, objects, isSelected, onMouseDown }) {
+export default function BeltObject({ belt, objects, isSelected, onMouseDown, onDblClick }) {
   const offsetRef = useRef(0)
   const shapeRef  = useRef(null)
 
@@ -18,7 +18,7 @@ export default function BeltObject({ belt, objects, isSelected, onMouseDown }) {
   useEffect(() => {
     let frameId
     const tick = () => {
-      offsetRef.current = (offsetRef.current + CHEVRON_SPEED) % (CELL_SIZE * 3)
+      offsetRef.current = (offsetRef.current + CHEVRON_SPEED) % (CELL_SIZE * 2)
       shapeRef.current?.getLayer()?.batchDraw()
       frameId = requestAnimationFrame(tick)
     }
@@ -66,6 +66,7 @@ export default function BeltObject({ belt, objects, isSelected, onMouseDown }) {
         strokeWidth={isSelected ? 2 : 1}
         cornerRadius={2}
         onMouseDown={onMouseDown}
+        onDblClick={onDblClick}
         listening={true}
       />
 
@@ -74,20 +75,30 @@ export default function BeltObject({ belt, objects, isSelected, onMouseDown }) {
         ref={shapeRef}
         listening={false}
         stroke={CHEVRON_COLOR}
-        strokeWidth={2}
+        strokeWidth={0.8}
         fill="transparent"
         lineCap="round"
         lineJoin="round"
+        opacity={0.45}
         sceneFunc={(ctx, shape) => {
           const offset  = offsetRef.current
-          const spacing = CELL_SIZE * 3
-          const aw = CELL_SIZE * 0.8   // how far back each chevron wing extends
-          const ah = hw * 0.55         // chevron half-height
+          const spacing = CELL_SIZE * 2
+          const aw = CELL_SIZE * 0.15  // how far back each chevron wing extends
+          const ah = hw * 0.18         // chevron half-height
+          const rows = [
+            { y: -hw * 0.48, xShift: 0 },
+            { y: -hw * 0.16, xShift: spacing / 2 },
+            { y:  hw * 0.16, xShift: 0 },
+            { y:  hw * 0.48, xShift: spacing / 2 },
+          ]
           ctx.beginPath()
-          for (let x = (offset % spacing) - halfLen; x < halfLen; x += spacing) {
-            ctx.moveTo(x - aw, -ah)
-            ctx.lineTo(x, 0)
-            ctx.lineTo(x - aw, ah)
+          for (const { y: rowY, xShift } of rows) {
+            const start = ((offset + xShift) % spacing) - halfLen
+            for (let x = start; x < halfLen; x += spacing) {
+              ctx.moveTo(x - aw, rowY - ah)
+              ctx.lineTo(x, rowY)
+              ctx.lineTo(x - aw, rowY + ah)
+            }
           }
           ctx.fillStrokeShape(shape)
         }}

@@ -148,6 +148,8 @@ export default function App() {
   const beltsRef              = useRef([])
   const pendingBeltRef        = useRef(null)
   const selectedIdRef         = useRef(1)
+  const beltDragStartRef      = useRef(null)  // { beltId, wx, wy } — potential split drag
+  const beltSplitDragRef      = useRef(null)  // { cpId } — actively dragging a split CP
 
   const [tool, setTool] = useState('pointer')
 
@@ -417,6 +419,51 @@ export default function App() {
     e.cancelBubble = true
     setSelectedObjIds(new Set())
     setSelectedBeltIds(new Set([beltId]))
+    // Record start position for potential split drag
+    const pointer = stageRef.current.getPointerPosition()
+    const vp = viewportRef.current
+    beltDragStartRef.current = {
+      beltId,
+      wx: (pointer.x - vp.x) / vp.scale,
+      wy: (pointer.y - vp.y) / vp.scale,
+    }
+  }, [])
+
+  const handleBeltDblClick = useCallback((e, beltId) => {
+    e.cancelBubble = true
+    const allBelts   = beltsRef.current
+    const allObjects = objectsRef.current
+    const clicked    = allBelts.find(b => b.id === beltId)
+    if (!clicked) return
+
+    const runBeltIds = new Set([beltId])
+    const runCpIds   = new Set()
+
+    function followForward(toObjId) {
+      const toObj = allObjects.find(o => o.id === toObjId)
+      if (!toObj || toObj.type !== 'connection_point') return
+      runCpIds.add(toObjId)
+      const next = allBelts.find(b => b.fromObjId === toObjId && !runBeltIds.has(b.id))
+      if (!next) return
+      runBeltIds.add(next.id)
+      followForward(next.toObjId)
+    }
+
+    function followBackward(fromObjId) {
+      const fromObj = allObjects.find(o => o.id === fromObjId)
+      if (!fromObj || fromObj.type !== 'connection_point') return
+      runCpIds.add(fromObjId)
+      const prev = allBelts.find(b => b.toObjId === fromObjId && !runBeltIds.has(b.id))
+      if (!prev) return
+      runBeltIds.add(prev.id)
+      followBackward(prev.fromObjId)
+    }
+
+    followForward(clicked.toObjId)
+    followBackward(clicked.fromObjId)
+
+    setSelectedBeltIds(runBeltIds)
+    setSelectedObjIds(runCpIds)
   }, [])
 
   // Click on stage background: deselect (unless ending a marquee drag)
@@ -457,7 +504,44 @@ export default function App() {
       wasDraggingMarqueeRef.current = false
     }
 
+    const snap = (v) => Math.round(v / CELL_SIZE) * CELL_SIZE
+
     const onMouseMove = (e) => {
+      // Belt split: check if drag exceeds threshold → create CP and split
+      if (beltDragStartRef.current) {
+        const { beltId, wx: startWx, wy: startWy } = beltDragStartRef.current
+        const { x: wx, y: wy } = toCanvas(e.clientX, e.clientY)
+        const vp = viewportRef.current
+        if (Math.hypot((wx - startWx) * vp.scale, (wy - startWy) * vp.scale) > 6) {
+          beltDragStartRef.current = null
+          const belt = beltsRef.current.find(b => b.id === beltId)
+          if (belt) {
+            const cpId = _nextObjId++, b1Id = _nextBeltId++, b2Id = _nextBeltId++
+            const cpObj = {
+              id: cpId, type: 'connection_point', layerId: belt.layerId,
+              rotation: 0, x: snap(startWx), y: snap(startWy),
+            }
+            setObjects(prev => [...prev, cpObj])
+            setBelts(prev => [
+              ...prev.filter(b => b.id !== beltId),
+              { id: b1Id, layerId: belt.layerId, fromObjId: belt.fromObjId, fromPortIdx: belt.fromPortIdx, toObjId: cpId, toPortIdx: 0 },
+              { id: b2Id, layerId: belt.layerId, fromObjId: cpId, fromPortIdx: 0, toObjId: belt.toObjId, toPortIdx: belt.toPortIdx },
+            ])
+            beltSplitDragRef.current = { cpId }
+            setSelectedBeltIds(new Set([b1Id, b2Id]))
+            setSelectedObjIds(new Set([cpId]))
+          }
+        }
+      }
+
+      // Belt split CP drag: move the new CP with the mouse
+      if (beltSplitDragRef.current) {
+        const { x: wx, y: wy } = toCanvas(e.clientX, e.clientY)
+        const cpId = beltSplitDragRef.current.cpId
+        setObjects(prev => prev.map(o => o.id === cpId ? { ...o, x: snap(wx), y: snap(wy) } : o))
+        return
+      }
+
       // Update pending belt cursor position
       if (pendingBeltRef.current) {
         const { x: wx, y: wy } = toCanvas(e.clientX, e.clientY)
@@ -480,6 +564,12 @@ export default function App() {
 
     const onMouseUp = (e) => {
       if (e.button !== 0) return
+
+      beltDragStartRef.current = null
+      if (beltSplitDragRef.current) {
+        beltSplitDragRef.current = null
+        return
+      }
 
       // Handle pending belt drop
       if (pendingBeltRef.current) {
@@ -691,6 +781,7 @@ export default function App() {
                       objects={objects}
                       isSelected={selectedBeltIds.has(belt.id)}
                       onMouseDown={(e) => handleBeltMouseDown(e, belt.id)}
+                      onDblClick={(e) => handleBeltDblClick(e, belt.id)}
                     />
                   ))}
 

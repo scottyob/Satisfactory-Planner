@@ -1,3 +1,4 @@
+import { useRef } from 'react'
 import { Group, Rect, Text, Circle, Line } from 'react-konva'
 import { CELL_SIZE } from './constants'
 import { ALL_BUILDINGS_BY_KEY } from './portUtils'
@@ -131,13 +132,63 @@ function ConnectorMarker({
   )
 }
 
+const DBLCLICK_MS = 300
+
 export default function BuildingObject({
   obj, isSelected, canDrag,
   onPointerDown, onDragStart, onDragMove, onDragEnd,
   onPortMouseDown, occupiedOutputs, occupiedInputs, pendingBeltType,
 }) {
+  const lastClickRef  = useRef(0)
+  const cancelDragRef = useRef(false)
+
   const def   = ALL_BUILDINGS_BY_KEY[obj.type]
   if (!def) return null
+
+  // Connection points render as a plain circle — no ports, no label
+  if (obj.type === 'connection_point') {
+    const r          = CELL_SIZE
+    const outputFree = !(occupiedOutputs ?? new Set()).has(0)
+
+    return (
+      <Group
+        x={obj.x} y={obj.y} rotation={obj.rotation}
+        draggable={canDrag}
+        onMouseDown={(e) => {
+          e.cancelBubble = true
+          const now = Date.now()
+          const isDouble = now - lastClickRef.current < DBLCLICK_MS
+          lastClickRef.current = now
+          if (isDouble && outputFree && onPortMouseDown) {
+            cancelDragRef.current = true   // suppress the drag Konva is about to start
+            onPortMouseDown(0)
+          } else {
+            onPointerDown?.(e)
+          }
+        }}
+        onDragStart={(e) => {
+          if (cancelDragRef.current) {
+            cancelDragRef.current = false
+            e.target.stopDrag()
+            return
+          }
+          onDragStart?.(e)
+        }}
+        onDragMove={onDragMove} onDragEnd={onDragEnd}
+      >
+        {isSelected && (
+          <Circle radius={r + 5} fill="transparent" stroke="#4a9eda" strokeWidth={1.5} dash={[4, 3]} listening={false} />
+        )}
+        <Circle
+          radius={r}
+          fill={`${def.color}55`}
+          stroke={outputFree ? '#5ee877' : def.color}
+          strokeWidth={1.5}
+        />
+      </Group>
+    )
+  }
+
   const pw    = def.w * CELL_SIZE
   const ph    = def.h * CELL_SIZE
   const hw    = pw / 2
