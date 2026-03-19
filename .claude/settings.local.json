@@ -14,7 +14,10 @@
       "WebFetch(domain:satisfactoryplanner.app)",
       "WebFetch(domain:factoriolab.github.io)",
       "WebFetch(domain:www.reddit.com)",
-      "Bash(npm run:*)"
+      "Bash(npm run:*)",
+      "Bash(grep -oP \"item: ''''[^'''']+''''\" src/recipes.js)",
+      "Bash(sed \"s/''''$//\")",
+      "Bash(sed \"s/''''.*$//\")"
     ]
   }
 }

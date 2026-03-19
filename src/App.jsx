@@ -4,6 +4,7 @@ import { CELL_SIZE, GRID_CELLS, GRID_PX, PANEL_WIDTH, TOOLBAR_HEIGHT } from './c
 import Toolbar from './Toolbar.jsx'
 import LayersPanel, { useLayers } from './LayersPanel.jsx'
 import BuildingObject from './BuildingObject.jsx'
+import FloorInputModal from './FloorInputModal.jsx'
 import BeltObject from './BeltObject.jsx'
 import { ALL_BUILDINGS_BY_KEY, getPortWorldPos, findNearestInputPort } from './portUtils.js'
 
@@ -174,6 +175,7 @@ export default function App() {
   const [pendingBelt, setPendingBelt]       = useState(null)
   const [marquee, setMarquee]               = useState(null)
   const [fileName, setFileName]             = useState(null)
+  const [floorInputModal, setFloorInputModal] = useState({ open: false, objId: null })
 
   // Keep refs in sync with latest state for use in stable callbacks
   viewportRef.current       = viewport
@@ -331,6 +333,9 @@ export default function App() {
     }
     setObjects(prev => [...prev, obj])
     setSelectedObjIds(new Set([obj.id]))
+    if (type === 'floor_input') {
+      setFloorInputModal({ open: true, objId: obj.id })
+    }
   }, [dimensions, viewport, selectedId])
 
   const updateObjPos = useCallback((id, x, y) => {
@@ -465,6 +470,14 @@ export default function App() {
     setSelectedBeltIds(runBeltIds)
     setSelectedObjIds(runCpIds)
   }, [])
+
+  // ── Floor input modal ─────────────────────────────────────────────────────
+
+  const handleFloorInputConfirm = useCallback((item, ratePerMin) => {
+    const { objId } = floorInputModal
+    setObjects(prev => prev.map(o => o.id === objId ? { ...o, item, ratePerMin } : o))
+    setFloorInputModal({ open: false, objId: null })
+  }, [floorInputModal])
 
   // Click on stage background: deselect (unless ending a marquee drag)
   const handleStageClick = useCallback((e) => {
@@ -791,6 +804,9 @@ export default function App() {
                       obj={obj}
                       isSelected={selectedObjIds.has(obj.id)}
                       canDrag={tool === 'pointer'}
+                      onDblClick={obj.type === 'floor_input'
+                        ? () => setFloorInputModal({ open: true, objId: obj.id })
+                        : undefined}
                       onPointerDown={(e) => {
                         if (tool !== 'pointer') return
                         e.cancelBubble = true
@@ -861,6 +877,14 @@ export default function App() {
         onAdd={addLayer}
         onReorder={reorderLayers}
         onAddBuilding={addBuilding}
+      />
+
+      <FloorInputModal
+        open={floorInputModal.open}
+        item={objects.find(o => o.id === floorInputModal.objId)?.item ?? null}
+        ratePerMin={objects.find(o => o.id === floorInputModal.objId)?.ratePerMin ?? 60}
+        onConfirm={handleFloorInputConfirm}
+        onCancel={() => setFloorInputModal({ open: false, objId: null })}
       />
     </div>
   )

@@ -1,5 +1,5 @@
-import { useRef } from 'react'
-import { Group, Rect, Text, Circle, Line } from 'react-konva'
+import { useRef, useState, useEffect } from 'react'
+import { Group, Rect, Text, Circle, Line, Image as KonvaImage } from 'react-konva'
 import { CELL_SIZE } from './constants'
 import { ALL_BUILDINGS_BY_KEY } from './portUtils'
 
@@ -132,12 +132,107 @@ function ConnectorMarker({
   )
 }
 
+function useItemImage(item) {
+  const [img, setImg] = useState(null)
+  useEffect(() => {
+    if (!item) { setImg(null); return }
+    const el = new window.Image()
+    el.onload  = () => setImg(el)
+    el.onerror = () => setImg(null)
+    el.src = `https://satisfactory.wiki.gg/images/${item.replace(/ /g, '_')}.png`
+  }, [item])
+  return img
+}
+
+// Rendered inside the floor_input building body
+function FloorInputContent({ obj, pw, ph, hw, hh, color }) {
+  const img = useItemImage(obj.item ?? null)
+
+  if (!obj.item) {
+    // Unconfigured — just show label centered
+    return (
+      <Text
+        x={-hw} y={-hh} width={pw} height={ph}
+        text={obj.item === undefined ? 'FLR IN' : ''}
+        align="center" verticalAlign="middle"
+        fontSize={12} fontFamily="monospace" fill={color} listening={false}
+      />
+    )
+  }
+
+  const topH   = Math.round(ph * 0.28)   // ~28% for text header
+  const imgPad = 6
+  const imgY   = -hh + topH + imgPad
+  const imgSize = ph - topH - imgPad * 2
+
+  const initials = obj.item.split(' ')
+    .filter(w => /[A-Z]/i.test(w[0]))
+    .map(w => w[0].toUpperCase())
+    .join('')
+    .slice(0, 2) || obj.item.slice(0, 2).toUpperCase()
+
+  return (
+    <>
+      {/* Item name — top */}
+      <Text
+        x={-hw} y={-hh + 3}
+        width={pw} height={topH * 0.6}
+        text={obj.item}
+        align="center" verticalAlign="middle"
+        fontSize={10} fontFamily="monospace" fill="#c8dff0"
+        listening={false} wrap="word"
+      />
+      {/* Rate — below item name */}
+      <Text
+        x={-hw} y={-hh + topH * 0.6 + 1}
+        width={pw} height={topH * 0.4}
+        text={`${obj.ratePerMin}/min`}
+        align="center" verticalAlign="middle"
+        fontSize={9} fontFamily="monospace" fill="#7aabcc"
+        listening={false}
+      />
+      {/* Divider line */}
+      <Line
+        points={[-hw + 4, -hh + topH, hw - 4, -hh + topH]}
+        stroke={`${color}55`} strokeWidth={1} listening={false}
+      />
+      {/* Item image or fallback circle */}
+      {img ? (
+        <KonvaImage
+          image={img}
+          x={-imgSize / 2} y={imgY}
+          width={imgSize} height={imgSize}
+          listening={false}
+        />
+      ) : (
+        <>
+          <Circle
+            x={0} y={imgY + imgSize / 2}
+            radius={imgSize / 2}
+            fill="#4a9eda33" stroke="#4a9eda" strokeWidth={1}
+            listening={false}
+          />
+          <Text
+            x={-imgSize / 2} y={imgY}
+            width={imgSize} height={imgSize}
+            text={initials}
+            align="center" verticalAlign="middle"
+            fontSize={Math.round(imgSize * 0.28)} fontFamily="monospace"
+            fill="#4a9eda" listening={false}
+          />
+        </>
+      )}
+    </>
+  )
+}
+
 const DBLCLICK_MS = 300
 
 export default function BuildingObject({
   obj, isSelected, canDrag,
   onPointerDown, onDragStart, onDragMove, onDragEnd,
   onPortMouseDown, occupiedOutputs, occupiedInputs, pendingBeltType,
+  onDblClick,
 }) {
   const lastClickRef  = useRef(0)
   const cancelDragRef = useRef(false)
@@ -205,6 +300,7 @@ export default function BuildingObject({
       rotation={obj.rotation}
       draggable={canDrag}
       onMouseDown={onPointerDown}
+      onDblClick={onDblClick}
       onDragStart={onDragStart}
       onDragMove={onDragMove}
       onDragEnd={onDragEnd}
@@ -237,20 +333,18 @@ export default function BuildingObject({
         cornerRadius={2}
       />
 
-      {/* Label */}
-      <Text
-        x={-hw}
-        y={-hh}
-        text={def.label}
-        width={pw}
-        height={ph}
-        align="center"
-        verticalAlign="middle"
-        fontSize={12}
-        fontFamily="monospace"
-        fill={color}
-        listening={false}
-      />
+      {/* Label or floor_input content */}
+      {obj.type === 'floor_input' ? (
+        <FloorInputContent obj={obj} pw={pw} ph={ph} hw={hw} hh={hh} color={color} />
+      ) : (
+        <Text
+          x={-hw} y={-hh}
+          text={def.label}
+          width={pw} height={ph}
+          align="center" verticalAlign="middle"
+          fontSize={12} fontFamily="monospace" fill={color} listening={false}
+        />
+      )}
 
       {/* Input connectors */}
       {def.inputs.map((conn, i) => (
