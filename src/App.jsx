@@ -5,6 +5,8 @@ import Toolbar from './Toolbar.jsx'
 import LayersPanel, { useLayers } from './LayersPanel.jsx'
 import BuildingObject from './BuildingObject.jsx'
 import FloorInputModal from './FloorInputModal.jsx'
+import RecipeModal from './RecipeModal.jsx'
+import { BUILDINGS_BY_KEY } from './buildings.js'
 import BeltObject from './BeltObject.jsx'
 import { ALL_BUILDINGS_BY_KEY, getPortWorldPos, findNearestInputPort } from './portUtils.js'
 
@@ -164,7 +166,7 @@ export default function App() {
 
   const {
     layers, selectedId,
-    addLayer, toggleVisible, renameLayer, selectLayer, reorderLayers,
+    addLayer, deleteLayer, toggleVisible, renameLayer, selectLayer, reorderLayers,
     restoreLayerState, _nextLayerId, _nextFloorNum,
   } = useLayers()
 
@@ -176,6 +178,7 @@ export default function App() {
   const [marquee, setMarquee]               = useState(null)
   const [fileName, setFileName]             = useState(null)
   const [floorInputModal, setFloorInputModal] = useState({ open: false, objId: null })
+  const [recipeModal,     setRecipeModal]     = useState({ open: false, objId: null })
 
   // Keep refs in sync with latest state for use in stable callbacks
   viewportRef.current       = viewport
@@ -472,6 +475,12 @@ export default function App() {
   }, [])
 
   // ── Floor input modal ─────────────────────────────────────────────────────
+
+  const handleRecipeConfirm = useCallback((recipeId, clockSpeed) => {
+    const { objId } = recipeModal
+    setObjects(prev => prev.map(o => o.id === objId ? { ...o, recipeId, clockSpeed } : o))
+    setRecipeModal({ open: false, objId: null })
+  }, [recipeModal])
 
   const handleFloorInputConfirm = useCallback((item, ratePerMin) => {
     const { objId } = floorInputModal
@@ -804,9 +813,13 @@ export default function App() {
                       obj={obj}
                       isSelected={selectedObjIds.has(obj.id)}
                       canDrag={tool === 'pointer'}
-                      onDblClick={obj.type === 'floor_input'
-                        ? () => setFloorInputModal({ open: true, objId: obj.id })
-                        : undefined}
+                      onDblClick={
+                        obj.type === 'floor_input'
+                          ? () => setFloorInputModal({ open: true, objId: obj.id })
+                          : BUILDINGS_BY_KEY[obj.type]
+                          ? () => setRecipeModal({ open: true, objId: obj.id })
+                          : undefined
+                      }
                       onPointerDown={(e) => {
                         if (tool !== 'pointer') return
                         e.cancelBubble = true
@@ -875,8 +888,12 @@ export default function App() {
         onToggleVisible={toggleVisible}
         onRename={renameLayer}
         onAdd={addLayer}
+        onDelete={deleteLayer}
         onReorder={reorderLayers}
         onAddBuilding={addBuilding}
+        selectedObj={selectedObjIds.size === 1
+          ? objects.find(o => o.id === [...selectedObjIds][0]) ?? null
+          : null}
       />
 
       <FloorInputModal
@@ -886,6 +903,20 @@ export default function App() {
         onConfirm={handleFloorInputConfirm}
         onCancel={() => setFloorInputModal({ open: false, objId: null })}
       />
+
+      {(() => {
+        const obj = objects.find(o => o.id === recipeModal.objId)
+        return (
+          <RecipeModal
+            open={recipeModal.open}
+            buildingType={obj?.type ?? ''}
+            recipeId={obj?.recipeId ?? null}
+            clockSpeed={obj?.clockSpeed ?? 1.0}
+            onConfirm={handleRecipeConfirm}
+            onCancel={() => setRecipeModal({ open: false, objId: null })}
+          />
+        )
+      })()}
     </div>
   )
 }

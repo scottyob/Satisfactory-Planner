@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { PANEL_WIDTH, CELL_SIZE } from './constants'
-import BUILDINGS from './buildings.js'
+import BUILDINGS, { BUILDINGS_BY_KEY } from './buildings.js'
+import { RECIPES_BY_ID } from './recipes.js'
 
 const BUILDINGS_HEIGHT = 240
 
@@ -103,6 +104,19 @@ export function useLayers() {
 
   const selectLayer = (id) => setSelectedId(id)
 
+  const deleteLayer = (id) => {
+    setLayers(prev => {
+      if (prev.length <= 1) return prev   // never delete the last floor
+      const next = prev.filter(l => l.id !== id)
+      return next
+    })
+    setSelectedId(prev => {
+      if (prev !== id) return prev
+      const remaining = layers.filter(l => l.id !== id)
+      return remaining[0]?.id ?? null
+    })
+  }
+
   const reorderLayers = (fromId, toId) => {
     setLayers(prev => {
       const arr = [...prev]
@@ -123,7 +137,7 @@ export function useLayers() {
 
   return {
     layers, selectedId,
-    addLayer, toggleVisible, renameLayer, selectLayer, reorderLayers,
+    addLayer, deleteLayer, toggleVisible, renameLayer, selectLayer, reorderLayers,
     restoreLayerState,
     _nextLayerId: () => _nextLayerId,
     _nextFloorNum: () => _nextFloorNum,
@@ -168,7 +182,7 @@ function EyeIcon({ open }) {
   )
 }
 
-function LayerItem({ layer, isSelected, onSelect, onToggleVisible, onRename, dragHandlers }) {
+function LayerItem({ layer, isSelected, canDelete, onSelect, onToggleVisible, onRename, onDelete, dragHandlers }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(layer.name)
 
@@ -255,6 +269,20 @@ function LayerItem({ layer, isSelected, onSelect, onToggleVisible, onRename, dra
 
       {isSelected && (
         <span style={{ fontSize: 8, color: '#4a9eda', flexShrink: 0 }}>●</span>
+      )}
+
+      {canDelete && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onDelete(layer.id) }}
+          title="Delete floor"
+          style={{
+            background: 'none', border: 'none', color: '#3a5a7a',
+            cursor: 'pointer', fontSize: 14, padding: '0 2px', lineHeight: 1,
+            flexShrink: 0,
+          }}
+          onMouseEnter={e => e.currentTarget.style.color = '#e87c7c'}
+          onMouseLeave={e => e.currentTarget.style.color = '#3a5a7a'}
+        >✕</button>
       )}
     </div>
   )
@@ -345,6 +373,132 @@ function ConnectorsTab({ onAddBuilding }) {
   )
 }
 
+// ─── Info panel ──────────────────────────────────────────────────────────────
+
+function ItemIcon({ item, size = 26 }) {
+  const [err, setErr] = useState(false)
+  const initials = item.split(' ').filter(w => /[A-Za-z]/.test(w[0])).map(w => w[0].toUpperCase()).join('').slice(0, 2) || item.slice(0, 2).toUpperCase()
+  if (err) {
+    return (
+      <div style={{
+        width: size, height: size, borderRadius: 4,
+        background: '#1a3a5c', border: '1px solid #2e5f8a',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        fontSize: Math.round(size * 0.35), fontWeight: 700, color: '#4a9eda',
+        flexShrink: 0,
+      }} title={item}>{initials}</div>
+    )
+  }
+  return (
+    <img
+      src={`https://satisfactory.wiki.gg/images/${item.replace(/ /g, '_')}.png`}
+      alt={item} title={item} width={size} height={size}
+      style={{ objectFit: 'contain', borderRadius: 3, flexShrink: 0 }}
+      onError={() => setErr(true)}
+    />
+  )
+}
+
+function ItemRow({ item, rate, rateColor }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '3px 0' }}>
+      <ItemIcon item={item} size={26} />
+      <div>
+        <div style={{ color: rateColor, fontSize: 11, fontFamily: 'monospace', fontWeight: 600 }}>{rate}</div>
+        <div style={{ color: '#7aabcc', fontSize: 10, fontFamily: 'monospace' }}>{item}</div>
+      </div>
+    </div>
+  )
+}
+
+function InfoPanel({ obj }) {
+  if (!obj) return null
+
+  const def    = BUILDINGS_BY_KEY[obj.type] ?? CONNECTORS_BY_KEY[obj.type]
+  const recipe = obj.recipeId ? RECIPES_BY_ID[obj.recipeId] : null
+  const factor = obj.clockSpeed ?? 1
+  const pct    = Math.round(factor * 100)
+  const fmtRate = (r) => {
+    const v = r * factor
+    return (v % 1 === 0 ? String(v) : v.toFixed(2).replace(/\.?0+$/, '')) + '/min'
+  }
+
+  return (
+    <div style={{
+      borderTop: '1px solid #1e3a54',
+      flexShrink: 0,
+      display: 'flex', flexDirection: 'column',
+    }}>
+      {/* Header */}
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '8px 12px 6px',
+        borderBottom: '1px solid #1e3a54',
+      }}>
+        <span style={{
+          color: '#7aabcc', fontFamily: 'monospace', fontSize: 11,
+          fontWeight: 'bold', letterSpacing: '0.1em', textTransform: 'uppercase',
+        }}>Info</span>
+        <span style={{ color: '#4a9eda', fontFamily: 'monospace', fontSize: 10 }}>
+          {def?.label ?? obj.type}
+        </span>
+      </div>
+
+      <div style={{ padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {/* Size */}
+        {def && (
+          <div style={{ color: '#3a6a8a', fontFamily: 'monospace', fontSize: 10 }}>
+            {def.w} × {def.h} cells
+          </div>
+        )}
+
+        {/* Floor input info */}
+        {obj.type === 'floor_input' && obj.item && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <ItemRow item={obj.item} rate={`${obj.ratePerMin ?? 60}/min`} rateColor="#4a9eda" />
+          </div>
+        )}
+
+        {/* Recipe info */}
+        {recipe ? (
+          <>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+              <span style={{ color: '#c8dff0', fontFamily: 'monospace', fontSize: 12, fontWeight: 600 }}>{recipe.name}</span>
+              <span style={{ color: pct === 100 ? '#3a6a8a' : '#e8a013', fontFamily: 'monospace', fontSize: 11 }}>{pct}%</span>
+            </div>
+
+            <div style={{ display: 'flex', gap: 8 }}>
+              {/* Inputs */}
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+                <div style={{ color: '#5ee877', fontSize: 9, fontFamily: 'monospace', fontWeight: 700, letterSpacing: 1, marginBottom: 2 }}>INPUTS</div>
+                {recipe.inputs.length === 0
+                  ? <span style={{ color: '#3a5a7a', fontSize: 10, fontFamily: 'monospace' }}>—</span>
+                  : recipe.inputs.map((inp, i) => (
+                    <ItemRow key={i} item={inp.item} rate={fmtRate(inp.perMin)} rateColor="#5ee877" />
+                  ))
+                }
+              </div>
+
+              {/* Arrow */}
+              <div style={{ color: '#4a9eda', fontSize: 18, paddingTop: 16, flexShrink: 0 }}>→</div>
+
+              {/* Outputs */}
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+                <div style={{ color: '#e8a013', fontSize: 9, fontFamily: 'monospace', fontWeight: 700, letterSpacing: 1, marginBottom: 2 }}>OUTPUTS</div>
+                {recipe.outputs.map((out, i) => (
+                  <ItemRow key={i} item={out.item} rate={fmtRate(out.perMin)} rateColor="#e8a013" />
+                ))}
+              </div>
+            </div>
+          </>
+        ) : obj.type !== 'floor_input' && BUILDINGS_BY_KEY[obj.type] && (
+          <span style={{ color: '#2e5f8a', fontFamily: 'monospace', fontSize: 11 }}>No recipe configured</span>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ─── Main panel ──────────────────────────────────────────────────────────────
 
 const TABS = [
@@ -353,7 +507,8 @@ const TABS = [
 ]
 
 export default function LayersPanel({
-  layers, selectedId, onSelect, onToggleVisible, onRename, onAdd, onReorder, onAddBuilding,
+  layers, selectedId, onSelect, onToggleVisible, onRename, onAdd, onDelete, onReorder, onAddBuilding,
+  selectedObj,
 }) {
   const [dragId, setDragId]     = useState(null)
   const [dragOverId, setDragOverId] = useState(null)
@@ -419,7 +574,7 @@ export default function LayersPanel({
           letterSpacing: '0.1em',
           textTransform: 'uppercase',
         }}>
-          Layers
+          Floors
         </span>
         <button
           onClick={onAdd}
@@ -466,14 +621,19 @@ export default function LayersPanel({
             <LayerItem
               layer={layer}
               isSelected={layer.id === selectedId}
+              canDelete={layers.length > 1}
               onSelect={onSelect}
               onToggleVisible={onToggleVisible}
               onRename={onRename}
+              onDelete={onDelete}
               dragHandlers={dragHandlers}
             />
           </div>
         ))}
       </div>
+
+      {/* ── Info panel ── */}
+      <InfoPanel obj={selectedObj} />
 
       {/* ── Bottom tab panel ── */}
       <div style={{
@@ -535,7 +695,7 @@ export default function LayersPanel({
         fontSize: 10,
         flexShrink: 0,
       }}>
-        dbl-click to rename · drag to reorder
+        dbl-click to rename · drag to reorder · ✕ to delete
       </div>
     </div>
   )

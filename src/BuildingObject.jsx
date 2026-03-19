@@ -2,6 +2,7 @@ import { useRef, useState, useEffect } from 'react'
 import { Group, Rect, Text, Circle, Line, Image as KonvaImage } from 'react-konva'
 import { CELL_SIZE } from './constants'
 import { ALL_BUILDINGS_BY_KEY } from './portUtils'
+import { RECIPES_BY_ID } from './recipes.js'
 
 // Connector colors: belt vs pipe, input vs output
 const BELT_IN  = '#5ee877'
@@ -226,6 +227,112 @@ function FloorInputContent({ obj, pw, ph, hw, hh, color }) {
   )
 }
 
+// A single item slot: small icon + rate + first word of item name, stacked
+function ItemSlot({ item, rate, rateColor, x, y, iconSize }) {
+  const img      = useItemImage(item)
+  const initials = item.split(' ').filter(w => /[A-Za-z]/.test(w[0])).map(w => w[0].toUpperCase()).join('').slice(0, 2) || item.slice(0, 2).toUpperCase()
+  const label    = item.split(' ')[0]   // first word — "Iron", "Plastic", etc.
+
+  return (
+    <Group x={x} y={y} listening={false}>
+      {img ? (
+        <KonvaImage image={img} x={-iconSize / 2} y={0} width={iconSize} height={iconSize} listening={false} />
+      ) : (
+        <>
+          <Circle x={0} y={iconSize / 2} radius={iconSize / 2} fill="#1a3a5c" stroke="#2e5f8a" strokeWidth={1} listening={false} />
+          <Text x={-iconSize / 2} y={0} width={iconSize} height={iconSize} text={initials}
+            align="center" verticalAlign="middle" fontSize={Math.round(iconSize * 0.32)}
+            fontFamily="monospace" fill="#4a9eda" listening={false} />
+        </>
+      )}
+      <Text x={-iconSize / 2} y={iconSize + 3} width={iconSize} height={18}
+        text={rate} align="center" fontSize={16} fontFamily="monospace" fill={rateColor} listening={false} />
+      <Text x={-iconSize / 2} y={iconSize + 20} width={iconSize} height={16}
+        text={label} align="center" fontSize={14} fontFamily="monospace" fill="#7aabcc" listening={false} />
+    </Group>
+  )
+}
+
+// Rendered inside a production building body when a recipe is configured
+function RecipeContent({ obj, pw, ph, hw, hh, color }) {
+  const recipe = RECIPES_BY_ID[obj.recipeId]
+  if (!recipe) return null
+
+  const factor   = obj.clockSpeed ?? 1
+  const pct      = Math.round(factor * 100)
+  const fmtRate  = (r) => {
+    const v = r * factor
+    return (v % 1 === 0 ? String(v) : v.toFixed(1)) + '/m'
+  }
+
+  const iconSize  = Math.min(CELL_SIZE * 1.5, 56)       // ~56px (doubled)
+  const slotW     = iconSize + 8
+  const slotH     = iconSize + 36                        // icon + rate + label (doubled text)
+  const arrowGap  = 28
+  const labelH    = 14                                   // recipe name line
+  const pctH      = 18                                   // clock % line
+  const aboveH    = labelH + pctH + 4                    // total above-icon label block
+
+  // X positions: inputs left of center, arrow, outputs right
+  const nIn    = recipe.inputs.length
+  const nOut   = recipe.outputs.length
+  const gap    = 8
+  const inW    = nIn  * slotW + (nIn  - 1) * gap
+  const outW   = nOut * slotW + (nOut - 1) * gap
+  const totalW = inW + arrowGap + outW
+  const startX = -totalW / 2
+
+  // Center the whole block (labels + icons) vertically in the building
+  const blockH    = aboveH + slotH
+  const blockTopY = -blockH / 2
+  const slotTopY  = blockTopY + aboveH
+
+  return (
+    <>
+      {/* Recipe name — just above icons */}
+      <Text
+        x={-hw} y={blockTopY} width={pw} height={labelH}
+        text={recipe.name} align="center" verticalAlign="middle"
+        fontSize={9} fontFamily="monospace" fill="#c8dff0" listening={false} wrap="word"
+      />
+
+      {/* Clock % — between name and icons */}
+      <Text
+        x={-hw} y={blockTopY + labelH + 2} width={pw} height={pctH}
+        text={`${pct}%`} align="center" verticalAlign="middle"
+        fontSize={16} fontFamily="monospace"
+        fill={pct === 100 ? '#7aabcc' : '#e8a013'} listening={false}
+      />
+
+      {/* Input slots */}
+      {recipe.inputs.map((inp, i) => (
+        <ItemSlot key={`in-${i}`}
+          item={inp.item} rate={fmtRate(inp.perMin)} rateColor="#5ee877"
+          x={startX + i * (slotW + gap) + slotW / 2}
+          y={slotTopY} iconSize={iconSize}
+        />
+      ))}
+
+      {/* Arrow */}
+      <Text
+        x={startX + inW} y={slotTopY + iconSize / 2 - 11}
+        width={arrowGap} height={22}
+        text="→" align="center" verticalAlign="middle"
+        fontSize={20} fill="#4a9eda" listening={false}
+      />
+
+      {/* Output slots */}
+      {recipe.outputs.map((out, i) => (
+        <ItemSlot key={`out-${i}`}
+          item={out.item} rate={fmtRate(out.perMin)} rateColor="#e8a013"
+          x={startX + inW + arrowGap + i * (slotW + gap) + slotW / 2}
+          y={slotTopY} iconSize={iconSize}
+        />
+      ))}
+    </>
+  )
+}
+
 const DBLCLICK_MS = 300
 
 export default function BuildingObject({
@@ -333,9 +440,11 @@ export default function BuildingObject({
         cornerRadius={2}
       />
 
-      {/* Label or floor_input content */}
+      {/* Label or floor_input/recipe content */}
       {obj.type === 'floor_input' ? (
         <FloorInputContent obj={obj} pw={pw} ph={ph} hw={hw} hh={hh} color={color} />
+      ) : obj.recipeId ? (
+        <RecipeContent obj={obj} pw={pw} ph={ph} hw={hw} hh={hh} color={color} />
       ) : (
         <Text
           x={-hw} y={-hh}
