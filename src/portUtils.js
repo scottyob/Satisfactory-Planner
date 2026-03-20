@@ -13,7 +13,7 @@ const PASS_THROUGH = new Set(['connection_point', 'splitter', 'merger'])
  * BFS from one belt, expanding through pass-through connectors.
  * Returns { beltIds, connectorIds, connTypes, sources, sinks }
  */
-export function computeBeltGroup(startBeltId, belts, objects) {
+export function computeBeltGroup(startBeltId, belts, objects, flowByBelt = null, portActualIn = null, itemByBelt = null) {
   const startBelt = belts.find(b => b.id === startBeltId)
   if (!startBelt) return null
 
@@ -61,8 +61,13 @@ export function computeBeltGroup(startBeltId, belts, objects) {
       if (BUILDINGS_BY_KEY[fromObj.type] && fromObj.recipeId) {
         const recipe = RECIPES_BY_ID[fromObj.recipeId]
         const out    = recipe?.outputs[belt.fromPortIdx]
-        if (out) sources.push({ item: out.item, rate: out.perMin * (fromObj.clockSpeed ?? 1) })
+        if (out) {
+          const rate = flowByBelt?.get(beltId) ?? out.perMin * (fromObj.clockSpeed ?? 1)
+          sources.push({ item: out.item, rate })
+        }
       } else if (fromObj.type === 'floor_input' && fromObj.item) {
+        // Always use configured production rate — belt may carry less due to backpressure,
+        // but the source is producing this much regardless
         sources.push({ item: fromObj.item, rate: fromObj.ratePerMin ?? 60 })
       }
     }
@@ -71,9 +76,14 @@ export function computeBeltGroup(startBeltId, belts, objects) {
       if (BUILDINGS_BY_KEY[toObj.type] && toObj.recipeId) {
         const recipe = RECIPES_BY_ID[toObj.recipeId]
         const inp    = recipe?.inputs[belt.toPortIdx]
-        if (inp) sinks.push({ item: inp.item, rate: inp.perMin * (toObj.clockSpeed ?? 1) })
+        if (inp) {
+          const rate = inp.perMin * (toObj.clockSpeed ?? 1)
+          sinks.push({ item: inp.item, rate })
+        }
       } else if (toObj.type === 'floor_output') {
-        sinks.push({ item: null, rate: 0 })
+        const rate = flowByBelt?.get(beltId) ?? 0
+        const item = itemByBelt?.get(beltId) ?? null
+        sinks.push({ item, rate })
       }
     }
   }
@@ -82,16 +92,45 @@ export function computeBeltGroup(startBeltId, belts, objects) {
 }
 
 /**
- * Simulate belt flow through the network using a topological propagation.
- * Respects splitter even-distribution, merger summation, and belt tier speed caps.
+ * Distribute `available` supply among outputs using fair-share with demand caps.
+ * Outputs that demand less than their fair share free up their remainder for others.
+ */
+function distributeSplitter(available, demands) {
+  const allocated = new Array(demands.length).fill(0)
+  let remaining = available
+  let pending   = demands.map((_, i) => i)
+  while (pending.length > 0 && remaining > 1e-9) {
+    const fairShare = remaining / pending.length
+    const next = []
+    let consumed = 0
+    for (const i of pending) {
+      if (demands[i] <= fairShare + 1e-9) { allocated[i] = demands[i]; consumed += demands[i] }
+      else next.push(i)
+    }
+    if (next.length === pending.length) { for (const i of next) allocated[i] = fairShare; break }
+    remaining -= consumed
+    pending = next
+  }
+  return allocated
+}
+
+/**
+ * Simulate belt flow with backpressure:
+ *   1. Backward pass  — propagate downstream demand toward sources
+ *   2. Forward pass   — route supply only as far as it is demanded
+ *
+ * Splitters redistribute excess capacity from low-demand outputs to high-demand ones.
+ * Floor_inputs are throttled to actual demand (not configured rate) so belts reflect
+ * steady-state flow; use `obj.ratePerMin` directly for configured-production figures.
  *
  * Returns:
- *   flowByBelt  — Map<beltId, rate>               actual rate flowing through each belt
- *   portActualIn — Map<`${objId}:${portIdx}`, rate>  actual rate arriving at each building input port
+ *   flowByBelt   — Map<beltId, rate>
+ *   itemByBelt   — Map<beltId, itemString>
+ *   portActualIn — Map<`${objId}:${portIdx}`, rate>  actual consumption at each input port
  */
 export function simulateBeltFlow(belts, objects) {
   const objsById = Object.fromEntries(objects.map(o => [o.id, o]))
-  const capBelt = (belt, rate) => {
+  const capBelt  = (belt, rate) => {
     const cap = belt.beltTier ? (BELT_SPEEDS[belt.beltTier] ?? Infinity) : Infinity
     return Math.min(rate, cap)
   }
@@ -99,88 +138,124 @@ export function simulateBeltFlow(belts, objects) {
   // Index belts by object
   const inBeltsForObj  = {}
   const outBeltsForObj = {}
-  for (const obj of objects) {
-    inBeltsForObj[obj.id]  = []
-    outBeltsForObj[obj.id] = []
-  }
+  for (const obj of objects) { inBeltsForObj[obj.id] = []; outBeltsForObj[obj.id] = [] }
   for (const belt of belts) {
     if (inBeltsForObj[belt.toObjId])    inBeltsForObj[belt.toObjId].push(belt)
     if (outBeltsForObj[belt.fromObjId]) outBeltsForObj[belt.fromObjId].push(belt)
   }
 
-  // Kahn's topological sort (handles cycles by skipping unresolved nodes)
+  // Kahn's topological sort
   const inDegree = {}
   for (const obj of objects) inDegree[obj.id] = 0
-  for (const belt of belts) {
-    if (objsById[belt.toObjId]) inDegree[belt.toObjId]++
-  }
-  const queue = objects.filter(o => inDegree[o.id] === 0).map(o => o.id)
-  const order = []
-  const visited = new Set()
-  while (queue.length > 0) {
-    const id = queue.shift()
+  for (const belt of belts) { if (objsById[belt.toObjId]) inDegree[belt.toObjId]++ }
+  const topoQ = objects.filter(o => inDegree[o.id] === 0).map(o => o.id)
+  const order = []; const visited = new Set()
+  while (topoQ.length > 0) {
+    const id = topoQ.shift()
     if (visited.has(id)) continue
-    visited.add(id)
-    order.push(id)
+    visited.add(id); order.push(id)
     for (const belt of outBeltsForObj[id] ?? []) {
-      inDegree[belt.toObjId]--
-      if (inDegree[belt.toObjId] === 0) queue.push(belt.toObjId)
+      if (--inDegree[belt.toObjId] === 0) topoQ.push(belt.toObjId)
     }
   }
 
-  // Propagate flows in topological order
-  const flowByBelt   = new Map() // beltId → rate
-  const portActualIn = new Map() // `${objId}:${portIdx}` → rate
+  // ── Backward pass: compute how much each belt's downstream can absorb ────────
+  const beltDemand = new Map() // beltId → rate demanded by downstream
+
+  for (const id of [...order].reverse()) {
+    const obj      = objsById[id]; if (!obj) continue
+    const inBelts  = inBeltsForObj[id]  ?? []
+    const outBelts = outBeltsForObj[id] ?? []
+
+    if (obj.type === 'floor_input') {
+      // Source — nothing upstream to inform
+    } else if (obj.type === 'floor_output') {
+      for (const b of inBelts) beltDemand.set(b.id, capBelt(b, Infinity))
+    } else if (obj.type === 'splitter') {
+      const totalOut = outBelts.reduce((s, b) => s + (beltDemand.get(b.id) ?? 0), 0)
+      for (const b of inBelts) beltDemand.set(b.id, totalOut)
+    } else if (obj.type === 'merger' || obj.type === 'connection_point') {
+      const totalOut = outBelts.reduce((s, b) => s + (beltDemand.get(b.id) ?? 0), 0)
+      for (const b of inBelts) beltDemand.set(b.id, totalOut)
+    } else if (BUILDINGS_BY_KEY[obj.type]) {
+      const recipe    = obj.recipeId ? RECIPES_BY_ID[obj.recipeId] : null
+      const clockSpeed = obj.clockSpeed ?? 1
+      for (const b of inBelts) {
+        const inp = recipe?.inputs[b.toPortIdx]
+        beltDemand.set(b.id, inp ? inp.perMin * clockSpeed : 0)
+      }
+      // Production buildings don't propagate output demand back to their inputs
+    }
+  }
+
+  // ── Forward pass: route supply constrained by demand ─────────────────────────
+  const flowByBelt   = new Map()
+  const itemByBelt   = new Map()
+  const portActualIn = new Map()
 
   for (const id of order) {
-    const obj = objsById[id]
-    if (!obj) continue
+    const obj      = objsById[id]; if (!obj) continue
     const inBelts  = inBeltsForObj[id]  ?? []
     const outBelts = outBeltsForObj[id] ?? []
     const totalIn  = () => inBelts.reduce((s, b) => s + (flowByBelt.get(b.id) ?? 0), 0)
+    const inItems  = () => [...new Set(inBelts.map(b => itemByBelt.get(b.id)).filter(Boolean))]
 
     if (obj.type === 'floor_input') {
-      const rate = obj.ratePerMin ?? 60
-      for (const b of outBelts) flowByBelt.set(b.id, capBelt(b, rate))
+      const supply = obj.ratePerMin ?? 60
+      for (const b of outBelts) {
+        flowByBelt.set(b.id, capBelt(b, Math.min(supply, beltDemand.get(b.id) ?? Infinity)))
+        itemByBelt.set(b.id, obj.item ?? null)
+      }
 
     } else if (obj.type === 'splitter') {
-      const nOut = outBelts.length
-      if (nOut > 0) {
-        const perOut = totalIn() / nOut
-        for (const b of outBelts) flowByBelt.set(b.id, capBelt(b, perOut))
+      const available = totalIn()
+      const items     = inItems()
+      if (outBelts.length > 0) {
+        const demands   = outBelts.map(b => capBelt(b, beltDemand.get(b.id) ?? 0))
+        const allocated = distributeSplitter(available, demands)
+        for (let i = 0; i < outBelts.length; i++) {
+          flowByBelt.set(outBelts[i].id, allocated[i])
+          if (items.length === 1) itemByBelt.set(outBelts[i].id, items[0])
+        }
       }
 
     } else if (obj.type === 'merger' || obj.type === 'connection_point') {
-      const sum = totalIn()
-      for (const b of outBelts) flowByBelt.set(b.id, capBelt(b, sum))
+      const sum      = totalIn()
+      const outDemand = outBelts.reduce((s, b) => s + (beltDemand.get(b.id) ?? 0), 0)
+      const items    = inItems()
+      for (const b of outBelts) {
+        flowByBelt.set(b.id, capBelt(b, Math.min(sum, outDemand)))
+        if (items.length === 1) itemByBelt.set(b.id, items[0])
+      }
 
     } else if (BUILDINGS_BY_KEY[obj.type]) {
-      // Record actual input rates at each port
+      const recipe     = obj.recipeId ? RECIPES_BY_ID[obj.recipeId] : null
+      const clockSpeed = obj.clockSpeed ?? 1
       for (const b of inBelts) {
-        portActualIn.set(`${id}:${b.toPortIdx}`, flowByBelt.get(b.id) ?? 0)
+        const demanded = beltDemand.get(b.id) ?? 0
+        portActualIn.set(`${id}:${b.toPortIdx}`, Math.min(flowByBelt.get(b.id) ?? 0, demanded))
       }
-      const recipe = obj.recipeId ? RECIPES_BY_ID[obj.recipeId] : null
       if (recipe) {
-        const clockSpeed = obj.clockSpeed ?? 1
-        // Effective factor = bottleneck input ratio across all inputs
         let effectiveFactor = 1
         for (let i = 0; i < recipe.inputs.length; i++) {
           const required = recipe.inputs[i].perMin * clockSpeed
-          if (required > 0) {
-            const actual = portActualIn.get(`${id}:${i}`) ?? 0
-            effectiveFactor = Math.min(effectiveFactor, actual / required)
-          }
+          if (required > 0) effectiveFactor = Math.min(effectiveFactor, (portActualIn.get(`${id}:${i}`) ?? 0) / required)
         }
         effectiveFactor = Math.max(0, Math.min(1, effectiveFactor))
         for (const b of outBelts) {
           const out = recipe.outputs[b.fromPortIdx]
-          if (out) flowByBelt.set(b.id, capBelt(b, out.perMin * clockSpeed * effectiveFactor))
+          if (out) {
+            const outRate   = out.perMin * clockSpeed * effectiveFactor
+            const outDemand = beltDemand.get(b.id) ?? Infinity
+            flowByBelt.set(b.id, capBelt(b, Math.min(outRate, outDemand)))
+            itemByBelt.set(b.id, out.item)
+          }
         }
       }
     }
   }
 
-  return { flowByBelt, portActualIn }
+  return { flowByBelt, itemByBelt, portActualIn }
 }
 
 /**

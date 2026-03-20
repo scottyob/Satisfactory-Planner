@@ -227,6 +227,87 @@ function FloorInputContent({ obj, pw, ph, hw, hh, color }) {
   )
 }
 
+// Rendered inside the floor_output building body
+function FloorOutputContent({ incomingItems, pw, ph, hw, hh, color }) {
+  const item = incomingItems?.[0]?.item ?? null
+  const rate = incomingItems?.[0]?.rate ?? 0
+  const img  = useItemImage(item)
+
+  if (!item) {
+    return (
+      <Text
+        x={-hw} y={-hh} width={pw} height={ph}
+        text="FLR OUT"
+        align="center" verticalAlign="middle"
+        fontSize={12} fontFamily="monospace" fill={color} listening={false}
+      />
+    )
+  }
+
+  const topH   = Math.round(ph * 0.28)
+  const imgPad = 6
+  const imgY   = -hh + topH + imgPad
+  const imgSize = ph - topH - imgPad * 2
+
+  const initials = item.split(' ')
+    .filter(w => /[A-Z]/i.test(w[0]))
+    .map(w => w[0].toUpperCase())
+    .join('')
+    .slice(0, 2) || item.slice(0, 2).toUpperCase()
+
+  const fmtRate = rate % 1 === 0 ? `${rate}/min` : `${rate.toFixed(1)}/min`
+
+  return (
+    <>
+      <Text
+        x={-hw} y={-hh + 3}
+        width={pw} height={topH * 0.6}
+        text={item}
+        align="center" verticalAlign="middle"
+        fontSize={10} fontFamily="monospace" fill="#c8dff0"
+        listening={false} wrap="word"
+      />
+      <Text
+        x={-hw} y={-hh + topH * 0.6 + 1}
+        width={pw} height={topH * 0.4}
+        text={fmtRate}
+        align="center" verticalAlign="middle"
+        fontSize={9} fontFamily="monospace" fill="#7aabcc"
+        listening={false}
+      />
+      <Line
+        points={[-hw + 4, -hh + topH, hw - 4, -hh + topH]}
+        stroke={`${color}55`} strokeWidth={1} listening={false}
+      />
+      {img ? (
+        <KonvaImage
+          image={img}
+          x={-imgSize / 2} y={imgY}
+          width={imgSize} height={imgSize}
+          listening={false}
+        />
+      ) : (
+        <>
+          <Circle
+            x={0} y={imgY + imgSize / 2}
+            radius={imgSize / 2}
+            fill="#4a9eda33" stroke="#4a9eda" strokeWidth={1}
+            listening={false}
+          />
+          <Text
+            x={-imgSize / 2} y={imgY}
+            width={imgSize} height={imgSize}
+            text={initials}
+            align="center" verticalAlign="middle"
+            fontSize={Math.round(imgSize * 0.28)} fontFamily="monospace"
+            fill="#4a9eda" listening={false}
+          />
+        </>
+      )}
+    </>
+  )
+}
+
 // A single item slot: small icon + rate + first word of item name, stacked
 function ItemSlot({ item, rate, rateColor, x, y, iconSize }) {
   const img      = useItemImage(item)
@@ -351,6 +432,7 @@ export default function BuildingObject({
   onPointerDown, onDragStart, onDragMove, onDragEnd,
   onPortMouseDown, occupiedOutputs, occupiedInputs, pendingBeltType,
   onDblClick, onShowTooltip, onHideTooltip,
+  incomingItems,
 }) {
   const lastClickRef  = useRef(0)
   const cancelDragRef = useRef(false)
@@ -465,20 +547,24 @@ export default function BuildingObject({
         />
       )}
 
-      {/* Label or floor_input/recipe content */}
-      {obj.type === 'floor_input' ? (
-        <FloorInputContent obj={obj} pw={pw} ph={ph} hw={hw} hh={hh} color={color} />
-      ) : obj.recipeId ? (
-        <RecipeContent obj={obj} pw={pw} ph={ph} hw={hw} hh={hh} color={color} />
-      ) : (
-        <Text
-          x={-hw} y={-hh}
-          text={def.label}
-          width={pw} height={ph}
-          align="center" verticalAlign="middle"
-          fontSize={12} fontFamily="monospace" fill={color} listening={false}
-        />
-      )}
+      {/* Label or floor_input/floor_output/recipe content — counter-rotated so text is always upright */}
+      <Group rotation={-obj.rotation}>
+        {obj.type === 'floor_input' ? (
+          <FloorInputContent obj={obj} pw={pw} ph={ph} hw={hw} hh={hh} color={color} />
+        ) : obj.type === 'floor_output' ? (
+          <FloorOutputContent incomingItems={incomingItems} pw={pw} ph={ph} hw={hw} hh={hh} color={color} />
+        ) : obj.recipeId ? (
+          <RecipeContent obj={obj} pw={pw} ph={ph} hw={hw} hh={hh} color={color} />
+        ) : (
+          <Text
+            x={-hw} y={-hh}
+            text={def.label}
+            width={pw} height={ph}
+            align="center" verticalAlign="middle"
+            fontSize={12} fontFamily="monospace" fill={color} listening={false}
+          />
+        )}
+      </Group>
 
       {/* Input connectors */}
       {def.inputs.map((conn, i) => (

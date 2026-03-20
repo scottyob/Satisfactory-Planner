@@ -160,6 +160,9 @@ export default function App() {
   const lastRotateRef         = useRef(0)
   const selectedObjIdsRef     = useRef(new Set())
   const objectsRef            = useRef([])
+  const flowByBeltRef         = useRef(new Map())
+  const itemByBeltRef         = useRef(new Map())
+  const portActualInRef       = useRef(new Map())
   const dragStartPositionsRef = useRef(null)
   const marqueeStartRef       = useRef(null)
   const marqueeRef            = useRef(null)   // mirrors marquee state for event handler access
@@ -322,7 +325,7 @@ export default function App() {
   const hideTooltip = useCallback(() => setTooltip(null), [])
 
   const handleBeltHover = useCallback((beltId) => {
-    const group = computeBeltGroup(beltId, beltsRef.current, objectsRef.current)
+    const group = computeBeltGroup(beltId, beltsRef.current, objectsRef.current, flowByBeltRef.current, portActualInRef.current, itemByBeltRef.current)
     if (!group) { setTooltip(null); return }
 
     const fmt = (v) => (v % 1 === 0 ? String(v) : v.toFixed(1)) + '/min'
@@ -334,8 +337,13 @@ export default function App() {
       if (s.item) drainByItem[s.item] = (drainByItem[s.item] ?? 0) + s.rate
     }
 
+    const thisBeltRate = flowByBeltRef.current?.get(beltId)
     const allItems = [...new Set([...Object.keys(feedByItem), ...Object.keys(drainByItem)])]
     const content = []
+    if (thisBeltRate != null) {
+      content.push({ text: `This belt  ${fmt(thisBeltRate)}`, color: '#c8dff0' })
+      content.push({ text: '─────────────────', color: '#1e3a54' })
+    }
     allItems.forEach((item, idx) => {
       if (idx > 0) content.push({ text: '', color: '' })
       const feed = feedByItem[item] ?? 0
@@ -845,10 +853,13 @@ export default function App() {
 
   // ── Flow simulation ───────────────────────────────────────────────────────
 
-  const { flowByBelt, portActualIn } = useMemo(
+  const { flowByBelt, itemByBelt, portActualIn } = useMemo(
     () => simulateBeltFlow(belts, objects),
     [belts, objects]
   )
+  flowByBeltRef.current   = flowByBelt
+  itemByBeltRef.current   = itemByBelt
+  portActualInRef.current = portActualIn
 
   // ── Error detection ───────────────────────────────────────────────────────
 
@@ -985,6 +996,12 @@ export default function App() {
                       occupiedOutputs={beltsByFromObj[obj.id]}
                       occupiedInputs={beltsByToObj[obj.id]}
                       pendingBeltType={pendingBelt?.portType ?? null}
+                      incomingItems={obj.type === 'floor_output'
+                        ? belts
+                            .filter(b => b.toObjId === obj.id)
+                            .map(b => ({ item: itemByBelt.get(b.id) ?? null, rate: flowByBelt.get(b.id) ?? 0 }))
+                            .filter(x => x.item)
+                        : undefined}
                     />
                   ))}
                 </Layer>
@@ -1040,11 +1057,13 @@ export default function App() {
           : null}
         objects={objects}
         selectedBeltGroup={selectedBeltIds.size === 1
-          ? { ...computeBeltGroup([...selectedBeltIds][0], belts, objects), selectedBeltId: [...selectedBeltIds][0] }
+          ? { ...computeBeltGroup([...selectedBeltIds][0], belts, objects, flowByBelt, portActualIn, itemByBelt), selectedBeltId: [...selectedBeltIds][0] }
           : null}
         buildingErrors={buildingErrors}
         portActualIn={portActualIn}
         flowByBelt={flowByBelt}
+        itemByBelt={itemByBelt}
+        belts={belts}
       />
 
       <FloorInputModal

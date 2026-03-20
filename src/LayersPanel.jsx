@@ -541,7 +541,7 @@ function BeltGroupStats({ group, flowByBelt }) {
 
   const feedEntries  = Object.entries(feedByItem).sort((a, b) => b[1] - a[1])
   const drainEntries = Object.entries(drainByItem).sort((a, b) => b[1] - a[1])
-  const unknownDrains = sinks.filter(s => !s.item).length
+  const unknownDrains = sinks.filter(s => !s.item && s.rate === 0).length
 
   // Balance per item
   const allItems = new Set([...Object.keys(feedByItem), ...Object.keys(drainByItem)])
@@ -562,14 +562,14 @@ function BeltGroupStats({ group, flowByBelt }) {
 
   return (
     <div style={{ padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-      <div style={{ color: '#4a9eda', fontFamily: 'monospace', fontSize: 10 }}>{countParts}</div>
-
       {thisBeltRate != null && (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#0d1f2d', borderRadius: 3, padding: '4px 8px' }}>
           <span style={{ color: '#7aabcc', fontFamily: 'monospace', fontSize: 10 }}>This belt</span>
           <span style={{ color: '#c8dff0', fontFamily: 'monospace', fontSize: 11, fontWeight: 600 }}>{fmtPerMin(thisBeltRate)}</span>
         </div>
       )}
+
+      <div style={{ color: '#4a9eda', fontFamily: 'monospace', fontSize: 10 }}>{countParts}</div>
 
       {feedEntries.length > 0 && (
         <div>
@@ -616,7 +616,7 @@ function BeltGroupStats({ group, flowByBelt }) {
   )
 }
 
-function InfoPanel({ obj, selectedBeltGroup, objects, buildingErrors, portActualIn, flowByBelt }) {
+function InfoPanel({ obj, selectedBeltGroup, objects, buildingErrors, portActualIn, flowByBelt, itemByBelt, belts }) {
   const def    = obj ? (BUILDINGS_BY_KEY[obj.type] ?? CONNECTORS_BY_KEY[obj.type]) : null
   const recipe = obj?.recipeId ? RECIPES_BY_ID[obj.recipeId] : null
   const factor = obj?.clockSpeed ?? 1
@@ -678,6 +678,25 @@ function InfoPanel({ obj, selectedBeltGroup, objects, buildingErrors, portActual
           {obj.type === 'floor_input' && obj.item && (
             <ItemRow item={obj.item} rate={`${obj.ratePerMin ?? 60}/min`} rateColor="#4a9eda" />
           )}
+
+          {/* Floor output — show what it's receiving */}
+          {obj.type === 'floor_output' && (() => {
+            const incomingBelts = (belts ?? []).filter(b => b.toObjId === obj.id)
+            const inputs = incomingBelts
+              .map(b => ({ item: itemByBelt?.get(b.id) ?? null, rate: flowByBelt?.get(b.id) ?? 0 }))
+              .filter(x => x.item)
+            if (inputs.length === 0) return (
+              <span style={{ color: '#2e5f8a', fontFamily: 'monospace', fontSize: 11 }}>No connections</span>
+            )
+            return (
+              <div>
+                <div style={{ color: '#4a9eda', fontSize: 9, fontFamily: 'monospace', fontWeight: 700, letterSpacing: 1, marginBottom: 4 }}>RECEIVING</div>
+                {inputs.map((inp, i) => (
+                  <ItemRow key={i} item={inp.item} rate={fmtPerMin(inp.rate)} rateColor="#4a9eda" />
+                ))}
+              </div>
+            )
+          })()}
 
           {/* Recipe info */}
           {recipe ? (
@@ -758,7 +777,7 @@ const TABS = [
 
 export default function LayersPanel({
   layers, selectedId, onSelect, onToggleVisible, onRename, onAdd, onDelete, onReorder, onAddBuilding,
-  selectedObj, objects, selectedBeltGroup, buildingErrors, portActualIn, flowByBelt,
+  selectedObj, objects, selectedBeltGroup, buildingErrors, portActualIn, flowByBelt, itemByBelt, belts,
 }) {
   const [dragId, setDragId]     = useState(null)
   const [dragOverId, setDragOverId] = useState(null)
@@ -886,7 +905,7 @@ export default function LayersPanel({
       {/* ── Info panel — centered in free space ── */}
       <div style={{ flex: 1, display: 'flex', alignItems: 'center', padding: '12px 0' }}>
         <div style={{ width: '100%' }}>
-          <InfoPanel obj={selectedObj} selectedBeltGroup={selectedBeltGroup} objects={objects} buildingErrors={buildingErrors} portActualIn={portActualIn} flowByBelt={flowByBelt} />
+          <InfoPanel obj={selectedObj} selectedBeltGroup={selectedBeltGroup} objects={objects} buildingErrors={buildingErrors} portActualIn={portActualIn} flowByBelt={flowByBelt} itemByBelt={itemByBelt} belts={belts} />
         </div>
       </div>
 
