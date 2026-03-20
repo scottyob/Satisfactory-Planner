@@ -81,7 +81,7 @@ export const FOUNDATIONS = [
   },
 ]
 
-export const FOUNDATIONS_BY_KEY = Object.fromEntries(FOUNDATIONS.map(f => [f.key, f]))
+export const FOUNDATIONS_BY_KEY = Object.assign(Object.create(null), Object.fromEntries(FOUNDATIONS.map(f => [f.key, f])))
 export { floorTextureUrl }
 
 // ─── Layer state hook ────────────────────────────────────────────────────────
