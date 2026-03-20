@@ -44,6 +44,14 @@ const AXIS_COLOR  = '#1e3a54'
 let _nextObjId  = 1
 let _nextBeltId = 1
 
+// Guard against HMR resets: re-sync counters above any existing IDs before issuing new ones.
+function syncIdCounters(objects, belts) {
+  const maxObj  = objects.reduce((m, o) => Math.max(m, o.id),  0)
+  const maxBelt = belts.reduce((m, b)  => Math.max(m, b.id),  0)
+  if (_nextObjId  <= maxObj)  _nextObjId  = maxObj  + 1
+  if (_nextBeltId <= maxBelt) _nextBeltId = maxBelt + 1
+}
+
 const OBJ_KEY      = 'sp-objects'
 const VIEWPORT_KEY = 'sp-viewport'
 const BELTS_KEY    = 'sp-belts'
@@ -393,6 +401,7 @@ export default function App() {
   const snap = (v) => Math.round(v / CELL_SIZE) * CELL_SIZE
 
   const addBuilding = useCallback((type) => {
+    syncIdCounters(objectsRef.current, beltsRef.current)
     const vpX = (dimensions.width  / 2 - viewport.x) / viewport.scale
     const vpY = (dimensions.height / 2 - viewport.y) / viewport.scale
     const obj = {
@@ -607,6 +616,7 @@ export default function App() {
           beltDragStartRef.current = null
           const belt = beltsRef.current.find(b => b.id === beltId)
           if (belt) {
+            syncIdCounters(objectsRef.current, beltsRef.current)
             const cpId = _nextObjId++, b1Id = _nextBeltId++, b2Id = _nextBeltId++
             const cpObj = {
               id: cpId, type: 'connection_point', layerId: belt.layerId,
@@ -670,6 +680,7 @@ export default function App() {
         const nearest = findNearestInputPort(wx, wy, objectsRef.current, layerId, pb.portType, beltsRef.current)
 
         if (nearest) {
+          syncIdCounters(objectsRef.current, beltsRef.current)
           setBelts(prev => [...prev, {
             id:          _nextBeltId++,
             layerId,
@@ -680,6 +691,7 @@ export default function App() {
           }])
         } else {
           // Drop to empty space — create a connection_point and connect to it
+          syncIdCounters(objectsRef.current, beltsRef.current)
           const sx = Math.round(wx / CELL_SIZE) * CELL_SIZE
           const sy = Math.round(wy / CELL_SIZE) * CELL_SIZE
           const cpObj = {
