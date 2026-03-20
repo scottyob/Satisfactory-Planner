@@ -35,7 +35,7 @@ const btnStyle = {
   height: 30, transition: 'all 0.1s',
 }
 
-function FileMenu({ onNew, onSave, onLoad }) {
+function FileMenu({ onNew, onSave, onLoad, onLoadDemo }) {
   const [open, setOpen] = useState(false)
   const menuRef = useRef(null)
 
@@ -82,6 +82,9 @@ function FileMenu({ onNew, onSave, onLoad }) {
           </button>
           <button style={menuItemStyle} onClick={() => { onLoad(); setOpen(false); }}>
             Load
+          </button>
+          <button style={menuItemStyle} onClick={() => { onLoadDemo(); setOpen(false); }}>
+            Load Demo
           </button>
         </div>
       )}
@@ -149,7 +152,7 @@ function EditableTitle({ fileName, onRename }) {
   )
 }
 
-export default function Toolbar({ tool, onToolChange, fileName, onRename, onSave, onLoad, onNew }) {
+export default function Toolbar({ tool, onToolChange, fileName, onRename, onSave, onLoad, onNew, onLoadDemo }) {
   return (
     <div
       style={{
@@ -171,7 +174,7 @@ export default function Toolbar({ tool, onToolChange, fileName, onRename, onSave
 
       <div style={{ width: 1, height: 24, background: '#1e3a54', margin: '0 8px' }} />
 
-      <FileMenu onNew={onNew} onSave={onSave} onLoad={onLoad} />
+      <FileMenu onNew={onNew} onSave={onSave} onLoad={onLoad} onLoadDemo={onLoadDemo} />
 
       <div style={{ width: 1, height: 24, background: '#1e3a54', margin: '0 8px' }} />
 

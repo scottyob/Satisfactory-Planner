@@ -9,6 +9,7 @@ import RecipeModal from './RecipeModal.jsx'
 import { BUILDINGS_BY_KEY } from './buildings.js'
 import { RECIPES_BY_ID } from './recipes.js'
 import BeltObject from './BeltObject.jsx'
+import DEMO_STATE from './demo.js'
 import { ALL_BUILDINGS_BY_KEY, getPortWorldPos, findNearestInputPort, computeBeltGroup } from './portUtils.js'
 
 // Error boundary to catch rendering errors and reset state
@@ -47,6 +48,10 @@ const OBJ_KEY      = 'sp-objects'
 const VIEWPORT_KEY = 'sp-viewport'
 const BELTS_KEY    = 'sp-belts'
 
+function hasPersistedState() {
+  return !!(localStorage.getItem(OBJ_KEY) || localStorage.getItem(BELTS_KEY))
+}
+
 function loadObjects() {
   try {
     const saved = localStorage.getItem(OBJ_KEY)
@@ -56,7 +61,8 @@ function loadObjects() {
       return parsed.objects ?? []
     }
   } catch {}
-  return []
+  _nextObjId = DEMO_STATE.nextObjId
+  return DEMO_STATE.objects
 }
 
 function loadBelts() {
@@ -68,7 +74,8 @@ function loadBelts() {
       return parsed.belts ?? []
     }
   } catch {}
-  return []
+  _nextBeltId = DEMO_STATE.nextBeltId
+  return DEMO_STATE.belts
 }
 
 function loadViewport(w, h) {
@@ -76,6 +83,7 @@ function loadViewport(w, h) {
     const saved = localStorage.getItem(VIEWPORT_KEY)
     if (saved) return JSON.parse(saved)
   } catch {}
+  if (!hasPersistedState()) return DEMO_STATE.viewport
   const center = Math.floor(GRID_CELLS / 2)
   return { scale: 1, x: w / 2 - center * CELL_SIZE, y: h / 2 - center * CELL_SIZE }
 }
@@ -770,6 +778,24 @@ export default function App() {
     setFileName(null)
   }, [dimensions.width, dimensions.height])
 
+  const handleLoadDemo = useCallback(() => {
+    const state = DEMO_STATE
+    _nextObjId  = state.nextObjId
+    _nextBeltId = state.nextBeltId
+    setObjects(state.objects)
+    setBelts(state.belts)
+    setSelectedObjIds(new Set())
+    setSelectedBeltIds(new Set())
+    restoreLayerState(
+      state.layers,
+      state.selectedLayerId,
+      state.nextLayerId,
+      state.nextFloorNum,
+    )
+    setViewport(state.viewport)
+    setFileName('Demo')
+  }, [restoreLayerState])
+
   const handleLoad = useCallback(() => {
     const input    = document.createElement('input')
     input.type     = 'file'
@@ -866,7 +892,7 @@ export default function App() {
 
   return (
     <div style={{ width: '100vw', height: '100vh', background: BG_COLOR }}>
-      <Toolbar tool={tool} onToolChange={setTool} fileName={fileName} onRename={setFileName} onSave={handleSave} onLoad={handleLoad} onNew={handleNew} />
+      <Toolbar tool={tool} onToolChange={setTool} fileName={fileName} onRename={setFileName} onSave={handleSave} onLoad={handleLoad} onNew={handleNew} onLoadDemo={handleLoadDemo} />
 
       <div style={{ position: 'absolute', top: TOOLBAR_HEIGHT, left: 0 }}>
         <ErrorBoundary onReset={handleNew}>
