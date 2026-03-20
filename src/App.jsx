@@ -10,7 +10,7 @@ import { BUILDINGS_BY_KEY } from './buildings.js'
 import { RECIPES_BY_ID } from './recipes.js'
 import BeltObject from './BeltObject.jsx'
 import DEMO_STATE from './demo.js'
-import { ALL_BUILDINGS_BY_KEY, getPortWorldPos, findNearestInputPort, computeBeltGroup } from './portUtils.js'
+import { ALL_BUILDINGS_BY_KEY, getPortWorldPos, findNearestInputPort, computeBeltGroup, simulateBeltFlow } from './portUtils.js'
 
 // Error boundary to catch rendering errors and reset state
 class ErrorBoundary extends Component {
@@ -831,6 +831,13 @@ export default function App() {
     input.click()
   }, [restoreLayerState, handleNew])
 
+  // ── Flow simulation ───────────────────────────────────────────────────────
+
+  const { flowByBelt, portActualIn } = useMemo(
+    () => simulateBeltFlow(belts, objects),
+    [belts, objects]
+  )
+
   // ── Error detection ───────────────────────────────────────────────────────
 
   const buildingErrors = useMemo(() => {
@@ -852,29 +859,16 @@ export default function App() {
         if (!connected.has(portIdx)) {
           reasons.push(`${inp.item} input not connected`)
         } else {
-          const belt = belts.find(b => b.toObjId === obj.id && b.toPortIdx === portIdx)
-          if (belt) {
-            const group = computeBeltGroup(belt.id, belts, objects)
-            if (group) {
-              const feedByItem = {}, drainByItem = {}
-              for (const s of group.sources) {
-                if (s.item) feedByItem[s.item] = (feedByItem[s.item] ?? 0) + s.rate
-              }
-              for (const s of group.sinks) {
-                if (s.item) drainByItem[s.item] = (drainByItem[s.item] ?? 0) + s.rate
-              }
-              for (const item of Object.keys(drainByItem)) {
-                const diff = (feedByItem[item] ?? 0) - drainByItem[item]
-                if (diff < -0.01) reasons.push(`${item}: ${fmt(Math.abs(diff))} deficit`)
-              }
-            }
-          }
+          const actualRate   = portActualIn.get(`${obj.id}:${portIdx}`) ?? 0
+          const requiredRate = inp.perMin * (obj.clockSpeed ?? 1)
+          const deficit      = requiredRate - actualRate
+          if (deficit > 0.01) reasons.push(`${inp.item}: ${fmt(deficit)} deficit`)
         }
       }
       if (reasons.length > 0) errors.set(obj.id, reasons)
     }
     return errors
-  }, [objects, belts])
+  }, [objects, belts, portActualIn])
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -1034,9 +1028,11 @@ export default function App() {
           : null}
         objects={objects}
         selectedBeltGroup={selectedBeltIds.size === 1
-          ? computeBeltGroup([...selectedBeltIds][0], belts, objects)
+          ? { ...computeBeltGroup([...selectedBeltIds][0], belts, objects), selectedBeltId: [...selectedBeltIds][0] }
           : null}
         buildingErrors={buildingErrors}
+        portActualIn={portActualIn}
+        flowByBelt={flowByBelt}
       />
 
       <FloorInputModal

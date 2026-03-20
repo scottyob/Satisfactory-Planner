@@ -418,7 +418,7 @@ function fmtPerMin(v) {
   return (v % 1 === 0 ? String(v) : v.toFixed(2).replace(/\.?0+$/, '')) + '/min'
 }
 
-function FactoryStats({ objects }) {
+function FactoryStats({ objects, portActualIn }) {
   // Total power across all production buildings
   const totalPower = objects.reduce((sum, o) => {
     const def = BUILDINGS_BY_KEY[o.type]
@@ -431,17 +431,33 @@ function FactoryStats({ objects }) {
   const configured    = prodObjs.filter(o => o.recipeId)
   const unconfigured  = prodObjs.length - configured.length
 
-  // Net output per item (outputs minus inputs, across all configured buildings)
+  // Net output per item using actual simulated rates (outputs minus inputs)
   const net = {}
   for (const o of configured) {
     const recipe = RECIPES_BY_ID[o.recipeId]
     if (!recipe) continue
-    const factor = o.clockSpeed ?? 1
-    for (const out of recipe.outputs) {
-      net[out.item] = (net[out.item] ?? 0) + out.perMin * factor
+    const clockSpeed = o.clockSpeed ?? 1
+
+    // Compute effective factor from actual input rates
+    let effectiveFactor = 1
+    if (portActualIn && recipe.inputs.length > 0) {
+      for (let i = 0; i < recipe.inputs.length; i++) {
+        const required = recipe.inputs[i].perMin * clockSpeed
+        if (required > 0) {
+          const actual = portActualIn.get(`${o.id}:${i}`) ?? null
+          if (actual !== null) effectiveFactor = Math.min(effectiveFactor, actual / required)
+        }
+      }
+      effectiveFactor = Math.max(0, Math.min(1, effectiveFactor))
     }
-    for (const inp of recipe.inputs) {
-      net[inp.item] = (net[inp.item] ?? 0) - inp.perMin * factor
+
+    for (const out of recipe.outputs) {
+      net[out.item] = (net[out.item] ?? 0) + out.perMin * clockSpeed * effectiveFactor
+    }
+    for (let i = 0; i < recipe.inputs.length; i++) {
+      const inp = recipe.inputs[i]
+      const actual = portActualIn?.get(`${o.id}:${i}`) ?? inp.perMin * clockSpeed
+      net[inp.item] = (net[inp.item] ?? 0) - actual
     }
   }
 
@@ -507,8 +523,8 @@ function FactoryStats({ objects }) {
   )
 }
 
-function BeltGroupStats({ group }) {
-  const { beltIds, connTypes, sources, sinks } = group
+function BeltGroupStats({ group, flowByBelt }) {
+  const { beltIds, connTypes, sources, sinks, selectedBeltId } = group
   const beltCount     = beltIds.size
   const splitterCount = connTypes.splitter ?? 0
   const mergerCount   = connTypes.merger ?? 0
@@ -542,9 +558,18 @@ function BeltGroupStats({ group }) {
     mergerCount   > 0 && `${mergerCount} merger${mergerCount !== 1 ? 's' : ''}`,
   ].filter(Boolean).join('  ·  ')
 
+  const thisBeltRate = selectedBeltId != null && flowByBelt ? flowByBelt.get(selectedBeltId) : undefined
+
   return (
     <div style={{ padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: 10 }}>
       <div style={{ color: '#4a9eda', fontFamily: 'monospace', fontSize: 10 }}>{countParts}</div>
+
+      {thisBeltRate != null && (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#0d1f2d', borderRadius: 3, padding: '4px 8px' }}>
+          <span style={{ color: '#7aabcc', fontFamily: 'monospace', fontSize: 10 }}>This belt</span>
+          <span style={{ color: '#c8dff0', fontFamily: 'monospace', fontSize: 11, fontWeight: 600 }}>{fmtPerMin(thisBeltRate)}</span>
+        </div>
+      )}
 
       {feedEntries.length > 0 && (
         <div>
@@ -591,12 +616,25 @@ function BeltGroupStats({ group }) {
   )
 }
 
-function InfoPanel({ obj, selectedBeltGroup, objects, buildingErrors }) {
+function InfoPanel({ obj, selectedBeltGroup, objects, buildingErrors, portActualIn, flowByBelt }) {
   const def    = obj ? (BUILDINGS_BY_KEY[obj.type] ?? CONNECTORS_BY_KEY[obj.type]) : null
   const recipe = obj?.recipeId ? RECIPES_BY_ID[obj.recipeId] : null
   const factor = obj?.clockSpeed ?? 1
   const pct    = Math.round(factor * 100)
   const fmtRate = (r) => fmtPerMin(r * factor)
+
+  // Compute effective throughput factor based on actual vs required input rates
+  let effectiveFactor = 1
+  if (recipe && portActualIn && obj) {
+    for (let i = 0; i < recipe.inputs.length; i++) {
+      const required = recipe.inputs[i].perMin * factor
+      if (required > 0) {
+        const actual = portActualIn.get(`${obj.id}:${i}`) ?? null
+        if (actual !== null) effectiveFactor = Math.min(effectiveFactor, actual / required)
+      }
+    }
+    effectiveFactor = Math.max(0, Math.min(1, effectiveFactor))
+  }
 
   const subtitle = obj
     ? (def?.label ?? obj.type)
@@ -616,10 +654,10 @@ function InfoPanel({ obj, selectedBeltGroup, objects, buildingErrors }) {
       </div>
 
       {/* No building, no belt selected — factory stats */}
-      {!obj && !selectedBeltGroup && <FactoryStats objects={objects} />}
+      {!obj && !selectedBeltGroup && <FactoryStats objects={objects} portActualIn={portActualIn} />}
 
       {/* Single belt selected — belt group stats */}
-      {!obj && selectedBeltGroup && <BeltGroupStats group={selectedBeltGroup} />}
+      {!obj && selectedBeltGroup && <BeltGroupStats group={selectedBeltGroup} flowByBelt={flowByBelt} />}
 
       {/* Building selected */}
       {obj && (
@@ -653,13 +691,24 @@ function InfoPanel({ obj, selectedBeltGroup, objects, buildingErrors }) {
                   <div style={{ color: '#5ee877', fontSize: 9, fontFamily: 'monospace', fontWeight: 700, letterSpacing: 1, marginBottom: 2 }}>INPUTS</div>
                   {recipe.inputs.length === 0
                     ? <span style={{ color: '#3a5a7a', fontSize: 10, fontFamily: 'monospace' }}>—</span>
-                    : recipe.inputs.map((inp, i) => <ItemRow key={i} item={inp.item} rate={fmtRate(inp.perMin)} rateColor="#5ee877" />)
+                    : recipe.inputs.map((inp, i) => {
+                        const required = inp.perMin * factor
+                        const actual   = portActualIn?.get(`${obj.id}:${i}`) ?? null
+                        const deficit  = actual !== null && (required - actual) > 0.01
+                        const rate     = actual !== null ? fmtPerMin(actual) : fmtRate(inp.perMin)
+                        return <ItemRow key={i} item={inp.item} rate={rate} rateColor={deficit ? '#e87c7c' : '#5ee877'} />
+                      })
                   }
                 </div>
                 <div style={{ color: '#4a9eda', fontSize: 18, paddingTop: 16, flexShrink: 0 }}>→</div>
                 <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-                  <div style={{ color: '#e8a013', fontSize: 9, fontFamily: 'monospace', fontWeight: 700, letterSpacing: 1, marginBottom: 2 }}>OUTPUTS</div>
-                  {recipe.outputs.map((out, i) => <ItemRow key={i} item={out.item} rate={fmtRate(out.perMin)} rateColor="#e8a013" />)}
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 4, marginBottom: 2 }}>
+                    <div style={{ color: '#e8a013', fontSize: 9, fontFamily: 'monospace', fontWeight: 700, letterSpacing: 1 }}>OUTPUTS</div>
+                    {effectiveFactor < 0.999 && (
+                      <span style={{ color: '#e8a013', fontSize: 9, fontFamily: 'monospace' }}>({Math.round(effectiveFactor * 100)}%)</span>
+                    )}
+                  </div>
+                  {recipe.outputs.map((out, i) => <ItemRow key={i} item={out.item} rate={fmtPerMin(out.perMin * factor * effectiveFactor)} rateColor="#e8a013" />)}
                 </div>
               </div>
             </>
@@ -709,7 +758,7 @@ const TABS = [
 
 export default function LayersPanel({
   layers, selectedId, onSelect, onToggleVisible, onRename, onAdd, onDelete, onReorder, onAddBuilding,
-  selectedObj, objects, selectedBeltGroup, buildingErrors,
+  selectedObj, objects, selectedBeltGroup, buildingErrors, portActualIn, flowByBelt,
 }) {
   const [dragId, setDragId]     = useState(null)
   const [dragOverId, setDragOverId] = useState(null)
@@ -837,7 +886,7 @@ export default function LayersPanel({
       {/* ── Info panel — centered in free space ── */}
       <div style={{ flex: 1, display: 'flex', alignItems: 'center', padding: '12px 0' }}>
         <div style={{ width: '100%' }}>
-          <InfoPanel obj={selectedObj} selectedBeltGroup={selectedBeltGroup} objects={objects} buildingErrors={buildingErrors} />
+          <InfoPanel obj={selectedObj} selectedBeltGroup={selectedBeltGroup} objects={objects} buildingErrors={buildingErrors} portActualIn={portActualIn} flowByBelt={flowByBelt} />
         </div>
       </div>
 

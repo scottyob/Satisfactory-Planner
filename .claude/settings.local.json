@@ -18,7 +18,8 @@
       "Bash(grep -oP \"item: ''''[^'''']+''''\" src/recipes.js)",
       "Bash(sed \"s/''''$//\")",
       "Bash(sed \"s/''''.*$//\")",
-      "Bash(git rm:*)"
+      "Bash(git rm:*)",
+      "Bash(grep -E \"\\\\.\\(jsx?|json\\)$\")"
     ]
   }
 }
