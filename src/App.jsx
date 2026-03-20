@@ -184,6 +184,8 @@ export default function App() {
   const altZoopRef            = useRef(null)   // { srcObj } — set when Alt+click on foundation
   const zoopStateRef          = useRef(null)   // { srcObj, startWx, startWy, axis, zoopObjIds }
   const isAltDragRef          = useRef(false)  // true when alt+dragging non-foundation (duplicate on drop)
+  const altGhostIdsRef        = useRef(new Set()) // IDs of ghost objects added at drag start for alt-drag preview
+  const altGhostIdMapRef      = useRef(new Map()) // originalId → ghostId, for belt rerouting during alt-drag
 
   const [tool, setTool] = useState('pointer')
   const [selectFilter, setSelectFilter] = useState('all')
@@ -553,6 +555,30 @@ export default function App() {
         .filter(o => toTrack.has(o.id))
         .map(o => [o.id, { x: o.x, y: o.y }])
     )
+
+    // Alt drag: immediately add ghost copies at original positions so originals appear to stay put,
+    // and reroute belts to ghosts so they stay visually connected to the "original" during drag.
+    if (isAltDragRef.current) {
+      syncIdCounters(objectsRef.current, beltsRef.current)
+      const ghostIdMap = new Map() // originalId → ghostId
+      const ghosts = [...dragStartPositionsRef.current.keys()].map(oid => {
+        const orig = objectsRef.current.find(o => o.id === oid)
+        if (!orig) return null
+        const newId = _nextObjId++
+        altGhostIdsRef.current.add(newId)
+        ghostIdMap.set(oid, newId)
+        return { ...orig, id: newId }
+      }).filter(Boolean)
+      altGhostIdMapRef.current = ghostIdMap
+      if (ghosts.length > 0) {
+        setObjects(prev => [...prev, ...ghosts])
+        setBelts(prev => prev.map(b => ({
+          ...b,
+          fromObjId: ghostIdMap.get(b.fromObjId) ?? b.fromObjId,
+          toObjId:   ghostIdMap.get(b.toObjId)   ?? b.toObjId,
+        })))
+      }
+    }
   }, [])
 
   const handleObjDragMove = useCallback((e, id) => {
@@ -600,15 +626,27 @@ export default function App() {
         idMap.set(oid, newId)
         return { ...orig, id: newId, x: snap(sp.x + dx), y: snap(sp.y + dy) }
       }).filter(Boolean)
+      const ghostIds   = altGhostIdsRef.current
+      const ghostIdMap = altGhostIdMapRef.current
+      // Belts were rerouted to ghost IDs during drag start; resolve back to original IDs for inter-copy belt detection
+      const reverseGhostMapEarly = new Map([...ghostIdMap.entries()].map(([k, v]) => [v, k]))
       const newBelts = beltsRef.current
+        .map(b => ({ ...b, fromObjId: reverseGhostMapEarly.get(b.fromObjId) ?? b.fromObjId, toObjId: reverseGhostMapEarly.get(b.toObjId) ?? b.toObjId }))
         .filter(b => dragged.includes(b.fromObjId) && dragged.includes(b.toObjId))
         .map(b => ({ ...b, id: _nextBeltId++, fromObjId: idMap.get(b.fromObjId), toObjId: idMap.get(b.toObjId) }))
         .filter(b => b.fromObjId && b.toObjId)
+      altGhostIdsRef.current   = new Set()
+      altGhostIdMapRef.current = new Map()
       setObjects(prev => [
-        ...prev.map(o => { const sp = starts?.get(o.id); return sp ? { ...o, x: sp.x, y: sp.y } : o }),
+        ...prev.filter(o => !ghostIds.has(o.id)).map(o => { const sp = starts?.get(o.id); return sp ? { ...o, x: sp.x, y: sp.y } : o }),
         ...copies,
       ])
-      if (newBelts.length > 0) setBelts(prev => [...prev, ...newBelts])
+      setBelts(prev => {
+        const rerouted = reverseGhostMapEarly.size > 0
+          ? prev.map(b => ({ ...b, fromObjId: reverseGhostMapEarly.get(b.fromObjId) ?? b.fromObjId, toObjId: reverseGhostMapEarly.get(b.toObjId) ?? b.toObjId }))
+          : prev
+        return newBelts.length > 0 ? [...rerouted, ...newBelts] : rerouted
+      })
       setSelectedObjIds(new Set(copies.map(o => o.id)))
       dragStartPositionsRef.current = null
       return
