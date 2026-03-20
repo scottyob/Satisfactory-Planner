@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect, useRef, useMemo, Component } from 're
 import { Stage, Layer, Line, Rect } from 'react-konva'
 import { CELL_SIZE, GRID_CELLS, GRID_PX, PANEL_WIDTH, TOOLBAR_HEIGHT } from './constants'
 import Toolbar from './Toolbar.jsx'
-import LayersPanel, { useLayers } from './LayersPanel.jsx'
+import LayersPanel, { useLayers, FOUNDATIONS_BY_KEY } from './LayersPanel.jsx'
 import BuildingObject from './BuildingObject.jsx'
 import FloorInputModal from './FloorInputModal.jsx'
 import RecipeModal from './RecipeModal.jsx'
@@ -168,6 +168,12 @@ export default function App() {
   const marqueeRef            = useRef(null)   // mirrors marquee state for event handler access
   const wasDraggingMarqueeRef = useRef(false)
   const toolRef               = useRef('pointer')
+  const selectFilterRef       = useRef('all')
+  const suppressMarqueeRef    = useRef(false)
+  const ctrlKeyRef            = useRef(false)
+  const historyRef            = useRef([])   // undo stack: [{objects, belts}]
+  const clipboardRef          = useRef(null) // copy/cut: {objects, belts}
+  const saveHistoryRef        = useRef(null) // stable ref to saveHistory fn
   const beltsRef              = useRef([])
   const pendingBeltRef        = useRef(null)
   const selectedIdRef         = useRef(1)
@@ -175,8 +181,15 @@ export default function App() {
   const beltSplitDragRef      = useRef(null)  // { cpId } — actively dragging a split CP
   const mousePosRef           = useRef({ x: 0, y: 0 })
   const tooltipElRef          = useRef(null)
+  const altZoopRef            = useRef(null)   // { srcObj } — set when Alt+click on foundation
+  const zoopStateRef          = useRef(null)   // { srcObj, startWx, startWy, axis, zoopObjIds }
+  const isAltDragRef          = useRef(false)  // true when alt+dragging non-foundation (duplicate on drop)
 
   const [tool, setTool] = useState('pointer')
+  const [selectFilter, setSelectFilter] = useState('all')
+  const [viewOptions, setViewOptions] = useState([
+    { id: 'foundations', label: 'Foundations', visible: true },
+  ])
 
   const stageW = () => window.innerWidth  - PANEL_WIDTH
   const stageH = () => window.innerHeight - TOOLBAR_HEIGHT
@@ -208,6 +221,7 @@ export default function App() {
   selectedObjIdsRef.current = selectedObjIds
   objectsRef.current        = objects
   toolRef.current           = tool
+  selectFilterRef.current   = selectFilter
   beltsRef.current          = belts
   pendingBeltRef.current    = pendingBelt
   selectedIdRef.current     = selectedId
@@ -232,10 +246,87 @@ export default function App() {
     return () => window.removeEventListener('resize', onResize)
   }, [])
 
-  // Keyboard: tool switch, rotate (single select only), delete
+  // Track Ctrl key for marquee-override
+  useEffect(() => {
+    const onDown = (e) => { if (e.key === 'Control') ctrlKeyRef.current = true }
+    const onUp   = (e) => { if (e.key === 'Control') ctrlKeyRef.current = false }
+    window.addEventListener('keydown', onDown)
+    window.addEventListener('keyup',   onUp)
+    return () => { window.removeEventListener('keydown', onDown); window.removeEventListener('keyup', onUp) }
+  }, [])
+
+  // Keyboard: tool switch, rotate, delete, undo, copy/cut/paste
   useEffect(() => {
     const onKey = (e) => {
       if (e.target.tagName === 'INPUT') return
+
+      const ctrl = e.ctrlKey || e.metaKey
+
+      // Undo
+      if (ctrl && (e.key === 'z' || e.key === 'Z')) {
+        e.preventDefault()
+        const snap = historyRef.current.pop()
+        if (snap) {
+          setObjects(snap.objects)
+          setBelts(snap.belts)
+          setSelectedObjIds(new Set())
+          setSelectedBeltIds(new Set())
+        }
+        return
+      }
+
+      // Copy
+      if (ctrl && (e.key === 'c' || e.key === 'C')) {
+        e.preventDefault()
+        const selIds = selectedObjIdsRef.current
+        if (selIds.size === 0) return
+        const objs  = objectsRef.current.filter(o => selIds.has(o.id))
+        const belts = beltsRef.current.filter(b => selIds.has(b.fromObjId) && selIds.has(b.toObjId))
+        clipboardRef.current = { objects: objs, belts }
+        return
+      }
+
+      // Cut
+      if (ctrl && (e.key === 'x' || e.key === 'X')) {
+        e.preventDefault()
+        const selIds = selectedObjIdsRef.current
+        if (selIds.size === 0) return
+        const objs  = objectsRef.current.filter(o => selIds.has(o.id))
+        const belts = beltsRef.current.filter(b => selIds.has(b.fromObjId) && selIds.has(b.toObjId))
+        clipboardRef.current = { objects: objs, belts }
+        saveHistoryRef.current()
+        setObjects(prev => prev.filter(o => !selIds.has(o.id)))
+        setBelts(prev => prev.filter(b => !selIds.has(b.fromObjId) && !selIds.has(b.toObjId)))
+        setSelectedObjIds(new Set())
+        setSelectedBeltIds(new Set())
+        return
+      }
+
+      // Paste
+      if (ctrl && (e.key === 'v' || e.key === 'V')) {
+        e.preventDefault()
+        const cb = clipboardRef.current
+        if (!cb || cb.objects.length === 0) return
+        saveHistoryRef.current()
+        syncIdCounters(objectsRef.current, beltsRef.current)
+        const idMap = new Map()
+        const targetLayerId = selectedIdRef.current
+        const OFFSET = CELL_SIZE * 3
+        const newObjs = cb.objects.map(o => {
+          const newId = _nextObjId++
+          idMap.set(o.id, newId)
+          return { ...o, id: newId, layerId: targetLayerId, x: o.x + OFFSET, y: o.y + OFFSET }
+        })
+        const newBelts = cb.belts
+          .map(b => ({ ...b, id: _nextBeltId++, layerId: targetLayerId, fromObjId: idMap.get(b.fromObjId), toObjId: idMap.get(b.toObjId) }))
+          .filter(b => b.fromObjId && b.toObjId)
+        setObjects(prev => [...prev, ...newObjs])
+        setBelts(prev => [...prev, ...newBelts])
+        setSelectedObjIds(new Set(newObjs.map(o => o.id)))
+        setSelectedBeltIds(new Set())
+        return
+      }
+
       if (e.key === 'h' || e.key === 'H') setTool('pan')
       if (e.key === 'v' || e.key === 'V') setTool('pointer')
       if (e.key === 'Escape') {
@@ -246,13 +337,14 @@ export default function App() {
       if (e.key === 'Delete' || e.key === 'Backspace') {
         if (selectedObjIdsRef.current.size > 0) {
           const ids = selectedObjIdsRef.current
+          saveHistoryRef.current()
           setObjects(prev => prev.filter(o => !ids.has(o.id)))
-          // Remove belts connected to deleted objects
           setBelts(prev => prev.filter(b => !ids.has(b.fromObjId) && !ids.has(b.toObjId)))
           setSelectedObjIds(new Set())
         }
         if (selectedBeltIds.size > 0) {
           const ids = selectedBeltIds
+          saveHistoryRef.current()
           setBelts(prev => prev.filter(b => !ids.has(b.id)))
           setSelectedBeltIds(new Set())
         }
@@ -260,6 +352,7 @@ export default function App() {
       if ((e.key === 'r' || e.key === 'R') &&
           draggingObjRef.current !== null &&
           selectedObjIdsRef.current.size <= 1) {
+        saveHistoryRef.current()
         setObjects(prev => prev.map(o =>
           o.id === draggingObjRef.current
             ? { ...o, rotation: (o.rotation + 90) % 360 }
@@ -409,6 +502,7 @@ export default function App() {
   const snap = (v) => Math.round(v / CELL_SIZE) * CELL_SIZE
 
   const addBuilding = useCallback((type) => {
+    saveHistory()
     syncIdCounters(objectsRef.current, beltsRef.current)
     const vpX = (dimensions.width  / 2 - viewport.x) / viewport.scale
     const vpY = (dimensions.height / 2 - viewport.y) / viewport.scale
@@ -427,11 +521,30 @@ export default function App() {
     }
   }, [dimensions, viewport, selectedId])
 
+  const handleChangeFoundationColor = useCallback((ids, color) => {
+    saveHistoryRef.current()
+    setObjects(prev => prev.map(o => ids.includes(o.id) ? { ...o, color } : o))
+  }, [])
+
+  const saveHistory = useCallback(() => {
+    historyRef.current.push({ objects: objectsRef.current, belts: beltsRef.current })
+    if (historyRef.current.length > 100) historyRef.current.shift()
+  }, [])
+  saveHistoryRef.current = saveHistory
+
   const updateObjPos = useCallback((id, x, y) => {
     setObjects(prev => prev.map(o => o.id === id ? { ...o, x, y } : o))
   }, [])
 
   const handleObjDragStart = useCallback((e, id) => {
+    if (ctrlKeyRef.current) { e.target.stopDrag(); return }
+    if (e.evt?.altKey) {
+      const obj = objectsRef.current.find(o => o.id === id)
+      const def = obj ? ALL_BUILDINGS_BY_KEY[obj.type] : null
+      if (def?.isFoundation) { e.target.stopDrag(); return }  // zoop handled via container
+      isAltDragRef.current = true
+    }
+    saveHistoryRef.current()
     draggingObjRef.current = id
     const sel = selectedObjIdsRef.current
     const toTrack = sel.has(id) ? sel : new Set([id])
@@ -470,6 +583,37 @@ export default function App() {
     const x = snap(node.x())
     const y = snap(node.y())
 
+    if (isAltDragRef.current) {
+      isAltDragRef.current = false
+      const starts   = dragStartPositionsRef.current
+      const startPos = starts?.get(id)
+      const dx = startPos ? x - startPos.x : 0
+      const dy = startPos ? y - startPos.y : 0
+      syncIdCounters(objectsRef.current, beltsRef.current)
+      const idMap   = new Map()
+      const dragged = starts ? [...starts.keys()] : [id]
+      const copies  = dragged.map(oid => {
+        const orig = objectsRef.current.find(o => o.id === oid)
+        if (!orig) return null
+        const sp   = starts?.get(oid) ?? { x: orig.x, y: orig.y }
+        const newId = _nextObjId++
+        idMap.set(oid, newId)
+        return { ...orig, id: newId, x: snap(sp.x + dx), y: snap(sp.y + dy) }
+      }).filter(Boolean)
+      const newBelts = beltsRef.current
+        .filter(b => dragged.includes(b.fromObjId) && dragged.includes(b.toObjId))
+        .map(b => ({ ...b, id: _nextBeltId++, fromObjId: idMap.get(b.fromObjId), toObjId: idMap.get(b.toObjId) }))
+        .filter(b => b.fromObjId && b.toObjId)
+      setObjects(prev => [
+        ...prev.map(o => { const sp = starts?.get(o.id); return sp ? { ...o, x: sp.x, y: sp.y } : o }),
+        ...copies,
+      ])
+      if (newBelts.length > 0) setBelts(prev => [...prev, ...newBelts])
+      setSelectedObjIds(new Set(copies.map(o => o.id)))
+      dragStartPositionsRef.current = null
+      return
+    }
+
     const starts   = dragStartPositionsRef.current
     const startPos = starts?.get(id)
     if (startPos && starts.size > 1) {
@@ -489,6 +633,7 @@ export default function App() {
   // ── Port interaction ───────────────────────────────────────────────────────
 
   const handlePortMouseDown = useCallback((objId, portIdx) => {
+    suppressMarqueeRef.current = true
     // Reject if port is already occupied
     if (beltsRef.current.some(b => b.fromObjId === objId && b.fromPortIdx === portIdx)) return
 
@@ -510,6 +655,10 @@ export default function App() {
   }, [])
 
   const handleBeltMouseDown = useCallback((e, beltId) => {
+    const f = selectFilterRef.current
+    if (f === 'buildings' || f === 'foundations') return  // let marquee start; 'notFoundations' keeps belts interactive
+    if (ctrlKeyRef.current) return  // Ctrl+drag → marquee
+    suppressMarqueeRef.current = true
     e.cancelBubble = true
     setSelectedObjIds(new Set())
     setSelectedBeltIds(new Set([beltId]))
@@ -524,6 +673,8 @@ export default function App() {
   }, [])
 
   const handleBeltDblClick = useCallback((e, beltId) => {
+    const f = selectFilterRef.current
+    if (f === 'buildings' || f === 'foundations') return  // 'notFoundations' keeps belts interactive
     e.cancelBubble = true
     const allBelts   = beltsRef.current
     const allObjects = objectsRef.current
@@ -604,9 +755,18 @@ export default function App() {
     const onMouseDown = (e) => {
       if (e.button !== 0 || toolRef.current !== 'pointer') return
       if (pendingBeltRef.current) return  // already drawing a belt
-      const rect = container.getBoundingClientRect()
-      const hit  = stageRef.current.getIntersection({ x: e.clientX - rect.left, y: e.clientY - rect.top })
-      if (hit) return
+      // Alt+zoop: tile foundation in one axis as mouse drags
+      if (altZoopRef.current) {
+        const { srcObjs } = altZoopRef.current
+        altZoopRef.current = null
+        suppressMarqueeRef.current = false
+        const { x: wx, y: wy } = toCanvas(e.clientX, e.clientY)
+        saveHistoryRef.current()
+        zoopStateRef.current = { srcObjs, startWx: wx, startWy: wy, axis: null, zoopObjIds: new Set() }
+        return
+      }
+      // If a shape claimed this click (filter matched), don't start marquee
+      if (suppressMarqueeRef.current) { suppressMarqueeRef.current = false; return }
       const { x, y } = toCanvas(e.clientX, e.clientY)
       marqueeStartRef.current       = { cx: x, cy: y }
       wasDraggingMarqueeRef.current = false
@@ -615,6 +775,65 @@ export default function App() {
     const snap = (v) => Math.round(v / CELL_SIZE) * CELL_SIZE
 
     const onMouseMove = (e) => {
+      // Zoop: tile foundation group in one locked axis
+      if (zoopStateRef.current) {
+        const state = zoopStateRef.current
+        const { srcObjs, startWx, startWy } = state
+        const { x: wx, y: wy } = toCanvas(e.clientX, e.clientY)
+        const dx = wx - startWx
+        const dy = wy - startWy
+        // Lock axis on first significant movement
+        if (!state.axis) {
+          if (Math.abs(dx) > CELL_SIZE / 2 || Math.abs(dy) > CELL_SIZE / 2) {
+            state.axis = Math.abs(dx) >= Math.abs(dy) ? 'x' : 'y'
+          } else {
+            return
+          }
+        }
+        // Compute group bounding-box span along the locked axis
+        let span = 0
+        if (state.axis === 'x') {
+          let minX = Infinity, maxX = -Infinity
+          for (const o of srcObjs) {
+            const d = ALL_BUILDINGS_BY_KEY[o.type]
+            if (!d) continue
+            minX = Math.min(minX, o.x - d.w * CELL_SIZE / 2)
+            maxX = Math.max(maxX, o.x + d.w * CELL_SIZE / 2)
+          }
+          span = maxX - minX
+        } else {
+          let minY = Infinity, maxY = -Infinity
+          for (const o of srcObjs) {
+            const d = ALL_BUILDINGS_BY_KEY[o.type]
+            if (!d) continue
+            minY = Math.min(minY, o.y - d.h * CELL_SIZE / 2)
+            maxY = Math.max(maxY, o.y + d.h * CELL_SIZE / 2)
+          }
+          span = maxY - minY
+        }
+        if (span <= 0) return
+        const count   = Math.max(0, Math.round(Math.abs(state.axis === 'x' ? dx : dy) / span))
+        const tileDir = (state.axis === 'x' ? dx : dy) >= 0 ? 1 : -1
+        const oldIds  = state.zoopObjIds
+        syncIdCounters(objectsRef.current, beltsRef.current)
+        const newIds   = new Set()
+        const newTiles = []
+        for (let i = 1; i <= count; i++) {
+          for (const o of srcObjs) {
+            const newId = _nextObjId++
+            newIds.add(newId)
+            newTiles.push({
+              ...o, id: newId,
+              x: state.axis === 'x' ? o.x + tileDir * i * span : o.x,
+              y: state.axis === 'y' ? o.y + tileDir * i * span : o.y,
+            })
+          }
+        }
+        state.zoopObjIds = newIds
+        setObjects(prev => [...prev.filter(o => !oldIds.has(o.id)), ...newTiles])
+        return
+      }
+
       // Belt split: check if drag exceeds threshold → create CP and split
       if (beltDragStartRef.current) {
         const { beltId, wx: startWx, wy: startWy } = beltDragStartRef.current
@@ -624,6 +843,7 @@ export default function App() {
           beltDragStartRef.current = null
           const belt = beltsRef.current.find(b => b.id === beltId)
           if (belt) {
+            saveHistoryRef.current()
             syncIdCounters(objectsRef.current, beltsRef.current)
             const cpId = _nextObjId++, b1Id = _nextBeltId++, b2Id = _nextBeltId++
             const cpObj = {
@@ -674,6 +894,12 @@ export default function App() {
     const onMouseUp = (e) => {
       if (e.button !== 0) return
 
+      // Finish zoop — tiles already placed, just clear state
+      if (zoopStateRef.current) {
+        zoopStateRef.current = null
+        return
+      }
+
       beltDragStartRef.current = null
       if (beltSplitDragRef.current) {
         beltSplitDragRef.current = null
@@ -688,6 +914,7 @@ export default function App() {
         const nearest = findNearestInputPort(wx, wy, objectsRef.current, layerId, pb.portType, beltsRef.current)
 
         if (nearest) {
+          saveHistoryRef.current()
           syncIdCounters(objectsRef.current, beltsRef.current)
           setBelts(prev => [...prev, {
             id:          _nextBeltId++,
@@ -699,6 +926,7 @@ export default function App() {
           }])
         } else {
           // Drop to empty space — create a connection_point and connect to it
+          saveHistoryRef.current()
           syncIdCounters(objectsRef.current, beltsRef.current)
           const sx = Math.round(wx / CELL_SIZE) * CELL_SIZE
           const sy = Math.round(wy / CELL_SIZE) * CELL_SIZE
@@ -733,12 +961,18 @@ export default function App() {
       wasDraggingMarqueeRef.current = true
 
       const activeLayerId = selectedIdRef.current
+      const f = selectFilterRef.current
       const selected = new Set(
         objectsRef.current
           .filter(obj => {
             if (obj.layerId !== activeLayerId) return false
             const def = ALL_BUILDINGS_BY_KEY[obj.type]
             if (!def) return false
+            // Apply select filter
+            if (f === 'belts'          && obj.type !== 'connection_point')                     return false
+            if (f === 'buildings'      && (def.isFoundation || obj.type === 'connection_point')) return false
+            if (f === 'foundations'    && !def.isFoundation)                                    return false
+            if (f === 'notFoundations' && def.isFoundation)                                     return false
             const hw = def.w * CELL_SIZE / 2
             const hh = def.h * CELL_SIZE / 2
             return obj.x - hw < m.x + m.w && obj.x + hw > m.x &&
@@ -866,32 +1100,39 @@ export default function App() {
   const buildingErrors = useMemo(() => {
     const fmt = (v) => (v % 1 === 0 ? String(v) : v.toFixed(1)) + '/min'
     const errors = new Map() // id → string[]
-    const beltsByToObj = {}
+    // Build belt-by-destination index: objId → portIdx → belt
+    const beltByToObjPort = {}
     for (const b of belts) {
-      if (!beltsByToObj[b.toObjId]) beltsByToObj[b.toObjId] = new Set()
-      beltsByToObj[b.toObjId].add(b.toPortIdx)
+      if (!beltByToObjPort[b.toObjId]) beltByToObjPort[b.toObjId] = {}
+      beltByToObjPort[b.toObjId][b.toPortIdx] = b
     }
     for (const obj of objects) {
       if (!BUILDINGS_BY_KEY[obj.type] || !obj.recipeId) continue
       const recipe = RECIPES_BY_ID[obj.recipeId]
       if (!recipe || recipe.inputs.length === 0) continue
-      const connected = beltsByToObj[obj.id] ?? new Set()
+      const portBelts = beltByToObjPort[obj.id] ?? {}
       const reasons = []
       for (let portIdx = 0; portIdx < recipe.inputs.length; portIdx++) {
-        const inp = recipe.inputs[portIdx]
-        if (!connected.has(portIdx)) {
+        const inp  = recipe.inputs[portIdx]
+        const belt = portBelts[portIdx]
+        if (!belt) {
           reasons.push(`${inp.item} input not connected`)
         } else {
-          const actualRate   = portActualIn.get(`${obj.id}:${portIdx}`) ?? 0
-          const requiredRate = inp.perMin * (obj.clockSpeed ?? 1)
-          const deficit      = requiredRate - actualRate
-          if (deficit > 0.01) reasons.push(`${inp.item}: ${fmt(deficit)} deficit`)
+          const actualItem = itemByBelt.get(belt.id)
+          if (actualItem && actualItem !== inp.item) {
+            reasons.push(`Wrong item on input ${portIdx + 1}: got ${actualItem}, expected ${inp.item}`)
+          } else {
+            const actualRate   = portActualIn.get(`${obj.id}:${portIdx}`) ?? 0
+            const requiredRate = inp.perMin * (obj.clockSpeed ?? 1)
+            const deficit      = requiredRate - actualRate
+            if (deficit > 0.01) reasons.push(`${inp.item}: ${fmt(deficit)} deficit`)
+          }
         }
       }
       if (reasons.length > 0) errors.set(obj.id, reasons)
     }
     return errors
-  }, [objects, belts, portActualIn])
+  }, [objects, belts, portActualIn, itemByBelt])
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -909,7 +1150,14 @@ export default function App() {
 
   return (
     <div style={{ width: '100vw', height: '100vh', background: BG_COLOR }}>
-      <Toolbar tool={tool} onToolChange={setTool} fileName={fileName} onRename={setFileName} onSave={handleSave} onLoad={handleLoad} onNew={handleNew} onLoadDemo={handleLoadDemo} />
+      <Toolbar
+        tool={tool} onToolChange={setTool}
+        selectFilter={selectFilter} onSelectFilterChange={setSelectFilter}
+        viewOptions={viewOptions}
+        onViewToggle={(id) => setViewOptions(prev => prev.map(o => o.id === id ? { ...o, visible: !o.visible } : o))}
+        fileName={fileName} onRename={setFileName}
+        onSave={handleSave} onLoad={handleLoad} onNew={handleNew} onLoadDemo={handleLoadDemo}
+      />
 
       <div style={{ position: 'absolute', top: TOOLBAR_HEIGHT, left: 0 }}>
         <ErrorBoundary onReset={handleNew}>
@@ -939,12 +1187,56 @@ export default function App() {
               const isVisible = isActive || layer.visible
               if (!isVisible) return null
               const opacity   = isActive ? 1 : 0.15
-              const layerObjs = objects.filter(o => o.layerId === layer.id)
-              const layerBelts = belts.filter(b => b.layerId === layer.id)
+              const layerFoundations = objects.filter(o => o.layerId === layer.id &&  FOUNDATIONS_BY_KEY[o.type])
+              const layerBuildings   = objects.filter(o => o.layerId === layer.id && !FOUNDATIONS_BY_KEY[o.type])
+              const layerBelts       = belts.filter(b => b.layerId === layer.id)
 
               return (
                 <Layer key={layer.id} opacity={opacity} listening={isActive}>
-                  {/* Belts render behind buildings */}
+                  {/* Z-order: foundations (bottom) → belts → buildings (top) */}
+                  {viewOptions.find(o => o.id === 'foundations')?.visible && layerFoundations.map(obj => (
+                    <BuildingObject
+                      key={obj.id}
+                      obj={obj}
+                      isSelected={selectedObjIds.has(obj.id)}
+                      isError={false}
+                      errorReasons={[]}
+                      onShowTooltip={showTooltip}
+                      onHideTooltip={hideTooltip}
+                      canDrag={tool === 'pointer' && selectFilter !== 'belts' && selectFilter !== 'buildings' && selectFilter !== 'notFoundations'}
+                      onDblClick={undefined}
+                      onPointerDown={(e) => {
+                        if (tool !== 'pointer') return
+                        if (selectFilter === 'belts' || selectFilter === 'buildings' || selectFilter === 'notFoundations') return
+                        if (e.evt?.ctrlKey) return  // Ctrl+drag → marquee
+                        if (e.evt?.altKey) {
+                          const sel = selectedObjIds
+                          const srcObjs = (sel.has(obj.id) && sel.size > 1)
+                            ? objects.filter(o => sel.has(o.id) && FOUNDATIONS_BY_KEY[o.type])
+                            : [obj]
+                          altZoopRef.current = { srcObjs }
+                          suppressMarqueeRef.current = true
+                          return
+                        }
+                        suppressMarqueeRef.current = true
+                        e.cancelBubble = true
+                        if (e.evt.shiftKey) {
+                          setSelectedObjIds(prev => { const next = new Set(prev); next.has(obj.id) ? next.delete(obj.id) : next.add(obj.id); return next })
+                        } else if (!selectedObjIds.has(obj.id)) {
+                          setSelectedObjIds(new Set([obj.id]))
+                        }
+                      }}
+                      onDragStart={(e) => handleObjDragStart(e, obj.id)}
+                      onDragMove={(e)  => handleObjDragMove(e, obj.id)}
+                      onDragEnd={(e)   => handleObjDragEnd(e, obj.id)}
+                      onPortMouseDown={null}
+                      occupiedOutputs={new Set()}
+                      occupiedInputs={new Set()}
+                      pendingBeltType={null}
+                      incomingItems={undefined}
+                    />
+                  ))}
+
                   {layerBelts.map(belt => (
                     <BeltObject
                       key={belt.id}
@@ -958,7 +1250,7 @@ export default function App() {
                     />
                   ))}
 
-                  {layerObjs.map(obj => (
+                  {layerBuildings.map(obj => (
                     <BuildingObject
                       key={obj.id}
                       obj={obj}
@@ -967,9 +1259,17 @@ export default function App() {
                       errorReasons={buildingErrors.get(obj.id) ?? []}
                       onShowTooltip={showTooltip}
                       onHideTooltip={hideTooltip}
-                      canDrag={tool === 'pointer'}
+                      canDrag={tool === 'pointer' && (() => {
+                        const d = ALL_BUILDINGS_BY_KEY[obj.type]
+                        if (selectFilter === 'belts'          && obj.type !== 'connection_point')                      return false
+                        if (selectFilter === 'foundations')                                                             return false
+                        return true
+                      })()}
                       onDblClick={
-                        obj.type === 'floor_input'
+                        (selectFilter === 'belts' && obj.type !== 'connection_point') ||
+                        selectFilter === 'foundations'
+                          ? undefined
+                          : obj.type === 'floor_input'
                           ? () => setFloorInputModal({ open: true, objId: obj.id })
                           : BUILDINGS_BY_KEY[obj.type]
                           ? () => setRecipeModal({ open: true, objId: obj.id })
@@ -977,6 +1277,11 @@ export default function App() {
                       }
                       onPointerDown={(e) => {
                         if (tool !== 'pointer') return
+                        const def = ALL_BUILDINGS_BY_KEY[obj.type]
+                        if (selectFilter === 'belts'       && obj.type !== 'connection_point') return
+                        if (selectFilter === 'foundations')                                     return
+                        if (e.evt.ctrlKey) return  // Ctrl+drag → marquee
+                        suppressMarqueeRef.current = true
                         e.cancelBubble = true
                         if (e.evt.shiftKey) {
                           setSelectedObjIds(prev => {
@@ -992,7 +1297,11 @@ export default function App() {
                       onDragStart={(e) => handleObjDragStart(e, obj.id)}
                       onDragMove={(e)  => handleObjDragMove(e, obj.id)}
                       onDragEnd={(e)   => handleObjDragEnd(e, obj.id)}
-                      onPortMouseDown={(portIdx) => handlePortMouseDown(obj.id, portIdx)}
+                      onPortMouseDown={
+                        selectFilter === 'buildings' || selectFilter === 'foundations'
+                          ? null
+                          : (portIdx) => handlePortMouseDown(obj.id, portIdx)
+                      }
                       occupiedOutputs={beltsByFromObj[obj.id]}
                       occupiedInputs={beltsByToObj[obj.id]}
                       pendingBeltType={pendingBelt?.portType ?? null}
@@ -1055,6 +1364,8 @@ export default function App() {
         selectedObj={selectedObjIds.size === 1
           ? objects.find(o => o.id === [...selectedObjIds][0]) ?? null
           : null}
+        selectedObjIds={selectedObjIds}
+        onChangeFoundationColor={handleChangeFoundationColor}
         objects={objects}
         selectedBeltGroup={selectedBeltIds.size === 1
           ? { ...computeBeltGroup([...selectedBeltIds][0], belts, objects, flowByBelt, portActualIn, itemByBelt), selectedBeltId: [...selectedBeltIds][0] }

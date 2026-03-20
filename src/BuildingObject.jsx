@@ -3,6 +3,40 @@ import { Group, Rect, Text, Circle, Line, Image as KonvaImage } from 'react-konv
 import { CELL_SIZE } from './constants'
 import { ALL_BUILDINGS_BY_KEY } from './portUtils'
 import { RECIPES_BY_ID } from './recipes.js'
+import { floorTextureUrl } from './LayersPanel.jsx'
+
+function useImage(src) {
+  const [img, setImg] = useState(null)
+  useEffect(() => {
+    if (!src) return
+    const el = new window.Image()
+    el.onload = () => setImg(el)
+    el.src = src
+  }, [src])
+  return img
+}
+
+let _floorImg = null
+let _floorListeners = []
+
+// Shared floor texture loader — only loads once
+function useFloorTexture() {
+  const [img, setImg] = useState(_floorImg)
+  useEffect(() => {
+    if (_floorImg) return
+    const el = new window.Image()
+    el.onload = () => {
+      _floorImg = el
+      setImg(el)
+      _floorListeners.forEach(fn => fn(el))
+      _floorListeners = []
+    }
+    el.src = floorTextureUrl
+    _floorListeners.push(setImg)
+    return () => { _floorListeners = _floorListeners.filter(fn => fn !== setImg) }
+  }, [])
+  return img
+}
 
 // Connector colors: belt vs pipe, input vs output
 const BELT_IN  = '#5ee877'
@@ -414,6 +448,68 @@ function RecipeContent({ obj, pw, ph, hw, hh, color }) {
   )
 }
 
+// ─── Foundation body ─────────────────────────────────────────────────────────
+
+function FoundationBody({ pw, ph, hw, hh, isSelected, color }) {
+  const floorImg  = useFloorTexture()
+  const tintColor = color ?? '#8a7a5a'
+
+  // Crop the texture proportionally so it's cut, not squished.
+  // Scale is anchored to height: cropHeight = naturalHeight, cropWidth = naturalHeight * (pw/ph)
+  const crop = floorImg ? {
+    x: 0, y: 0,
+    width:  floorImg.naturalHeight * (pw / ph),
+    height: floorImg.naturalHeight,
+  } : null
+
+  return (
+    <>
+      {isSelected && (
+        <Rect
+          x={-hw - 3} y={-hh - 3}
+          width={pw + 6} height={ph + 6}
+          cornerRadius={4}
+          fill="transparent"
+          stroke="#4a9eda"
+          strokeWidth={1.5}
+          dash={[4, 3]}
+          listening={false}
+        />
+      )}
+      {/* Color tint base */}
+      <Rect
+        x={-hw} y={-hh}
+        width={pw} height={ph}
+        fill={tintColor}
+        opacity={0.55}
+        listening={false}
+      />
+      {/* Texture overlay */}
+      {floorImg ? (
+        <KonvaImage
+          image={floorImg}
+          x={-hw} y={-hh}
+          width={pw} height={ph}
+          crop={crop}
+          opacity={0.3}
+          stroke={isSelected ? '#c8b880' : '#6a5a3a'}
+          strokeWidth={isSelected ? 1.5 : 1}
+        />
+      ) : (
+        <Rect
+          x={-hw} y={-hh}
+          width={pw} height={ph}
+          fill="#4a3a2a"
+          opacity={0.3}
+          stroke={isSelected ? '#c8b880' : '#6a5a3a'}
+          strokeWidth={isSelected ? 1.5 : 1}
+          cornerRadius={1}
+        />
+      )}
+    </>
+  )
+}
+
 const DBLCLICK_MS = 300
 
 function usePulse(active) {
@@ -490,6 +586,22 @@ export default function BuildingObject({
   const hw    = pw / 2
   const hh    = ph / 2
   const color = def.color
+
+  // Foundations render with the floor texture — no connectors, no label
+  if (def.isFoundation) {
+    return (
+      <Group
+        x={obj.x} y={obj.y} rotation={obj.rotation}
+        draggable={canDrag}
+        onMouseDown={onPointerDown}
+        onDragStart={onDragStart}
+        onDragMove={onDragMove}
+        onDragEnd={onDragEnd}
+      >
+        <FoundationBody pw={pw} ph={ph} hw={hw} hh={hh} isSelected={isSelected} color={obj.color} />
+      </Group>
+    )
+  }
 
   const outs = occupiedOutputs ?? new Set()
   const ins  = occupiedInputs  ?? new Set()

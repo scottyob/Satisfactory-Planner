@@ -19,7 +19,9 @@
       "Bash(sed \"s/''''$//\")",
       "Bash(sed \"s/''''.*$//\")",
       "Bash(git rm:*)",
-      "Bash(grep -E \"\\\\.\\(jsx?|json\\)$\")"
+      "Bash(grep -E \"\\\\.\\(jsx?|json\\)$\")",
+      "Bash(mkdir -p \"C:/Users/scott/git/belts/src/assets\")",
+      "Bash(cp \"C:/Users/scott/git/belts/img/floor.png\" \"C:/Users/scott/git/belts/src/assets/floor.png\")"
     ]
   }
 }

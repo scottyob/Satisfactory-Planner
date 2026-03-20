@@ -1,9 +1,9 @@
 import { CELL_SIZE, BELT_SPEEDS } from './constants'
 import { BUILDINGS_BY_KEY } from './buildings'
-import { CONNECTORS_BY_KEY } from './LayersPanel'
+import { CONNECTORS_BY_KEY, FOUNDATIONS_BY_KEY } from './LayersPanel'
 import { RECIPES_BY_ID } from './recipes'
 
-export const ALL_BUILDINGS_BY_KEY = { ...BUILDINGS_BY_KEY, ...CONNECTORS_BY_KEY }
+export const ALL_BUILDINGS_BY_KEY = { ...BUILDINGS_BY_KEY, ...CONNECTORS_BY_KEY, ...FOUNDATIONS_BY_KEY }
 
 // ─── Belt group BFS ───────────────────────────────────────────────────────────
 
@@ -232,8 +232,17 @@ export function simulateBeltFlow(belts, objects) {
       const recipe     = obj.recipeId ? RECIPES_BY_ID[obj.recipeId] : null
       const clockSpeed = obj.clockSpeed ?? 1
       for (const b of inBelts) {
-        const demanded = beltDemand.get(b.id) ?? 0
-        portActualIn.set(`${id}:${b.toPortIdx}`, Math.min(flowByBelt.get(b.id) ?? 0, demanded))
+        const demanded      = beltDemand.get(b.id) ?? 0
+        const rawFlow       = Math.min(flowByBelt.get(b.id) ?? 0, demanded)
+        const expectedItem  = recipe?.inputs[b.toPortIdx]?.item
+        const actualItem    = itemByBelt.get(b.id)
+        const itemMismatch  = expectedItem && actualItem && actualItem !== expectedItem
+        if (itemMismatch) {
+          flowByBelt.set(b.id, 0)   // belt backs up — nothing accepted
+          portActualIn.set(`${id}:${b.toPortIdx}`, 0)
+        } else {
+          portActualIn.set(`${id}:${b.toPortIdx}`, rawFlow)
+        }
       }
       if (recipe) {
         let effectiveFactor = 1

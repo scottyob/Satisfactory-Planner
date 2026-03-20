@@ -22,9 +22,12 @@ function PointerIcon({ active }) {
   )
 }
 
-const TOOLS = [
-  { id: 'pan',     label: 'Pan',    shortcut: 'H', Icon: PanIcon },
-  { id: 'pointer', label: 'Select', shortcut: 'V', Icon: PointerIcon },
+const SELECT_FILTERS = [
+  { id: 'all',            label: 'All' },
+  { id: 'belts',          label: 'Belts' },
+  { id: 'buildings',      label: 'Buildings' },
+  { id: 'foundations',    label: 'Foundations' },
+  { id: 'notFoundations', label: 'Not Foundations' },
 ]
 
 const btnStyle = {
@@ -33,6 +36,81 @@ const btnStyle = {
   borderRadius: 5, color: '#7aabcc', cursor: 'pointer',
   fontFamily: 'monospace', fontSize: 12, padding: '4px 10px',
   height: 30, transition: 'all 0.1s',
+}
+
+function SelectMenu({ tool, onToolChange, selectFilter, onSelectFilterChange }) {
+  const [open, setOpen] = useState(false)
+  const menuRef = useRef(null)
+  const active = tool === 'pointer'
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (menuRef.current && !menuRef.current.contains(e.target)) setOpen(false)
+    }
+    if (open) document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [open])
+
+  const filterLabel = SELECT_FILTERS.find(f => f.id === selectFilter)?.label ?? 'All'
+
+  const activeStyle = {
+    background: active ? '#1a3a5c' : 'transparent',
+    border: active ? '1px solid #2e5f8a' : '1px solid transparent',
+    color: active ? '#c8dff0' : '#7aabcc',
+  }
+
+  const menuItemStyle = {
+    display: 'block', width: '100%', textAlign: 'left',
+    background: 'transparent', border: 'none',
+    color: '#c8dff0', fontFamily: 'monospace', fontSize: 12,
+    padding: '6px 12px', cursor: 'pointer',
+  }
+
+  return (
+    <div ref={menuRef} style={{ position: 'relative', display: 'flex' }}>
+      {/* Main button — activates pointer tool */}
+      <button
+        onClick={() => onToolChange('pointer')}
+        title="Select (V)"
+        style={{ ...btnStyle, ...activeStyle, borderRadius: '5px 0 0 5px', borderRight: 'none' }}
+      >
+        <PointerIcon active={active} />
+        Select ({filterLabel})
+        <span style={{ fontSize: 9, color: active ? '#4a9eda' : '#2e5f8a', marginLeft: 2 }}>V</span>
+      </button>
+      {/* Dropdown arrow */}
+      <button
+        onClick={() => setOpen(o => !o)}
+        title="Select filter"
+        style={{ ...btnStyle, ...activeStyle, borderRadius: '0 5px 5px 0', padding: '4px 7px', minWidth: 0 }}
+      >
+        ▾
+      </button>
+      {open && (
+        <div style={{
+          position: 'absolute', top: '100%', left: 0,
+          background: '#0d1b2a', border: '1px solid #2e5f8a',
+          borderRadius: 5, minWidth: 130,
+          boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+          zIndex: 100,
+        }}>
+          {SELECT_FILTERS.map(f => (
+            <button
+              key={f.id}
+              style={{
+                ...menuItemStyle,
+                color: f.id === selectFilter ? '#4a9eda' : '#c8dff0',
+                background: f.id === selectFilter ? '#1a3a5c' : 'transparent',
+              }}
+              onClick={() => { onSelectFilterChange(f.id); onToolChange('pointer'); setOpen(false) }}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
 }
 
 function FileMenu({ onNew, onSave, onLoad, onLoadDemo }) {
@@ -86,6 +164,52 @@ function FileMenu({ onNew, onSave, onLoad, onLoadDemo }) {
           <button style={menuItemStyle} onClick={() => { onLoadDemo(); setOpen(false); }}>
             Load Demo
           </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ViewMenu({ viewOptions, onToggle }) {
+  const [open, setOpen] = useState(false)
+  const menuRef = useRef(null)
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (menuRef.current && !menuRef.current.contains(e.target)) setOpen(false)
+    }
+    if (open) document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [open])
+
+  const menuItemStyle = {
+    display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left',
+    background: 'transparent', border: 'none',
+    color: '#c8dff0', fontFamily: 'monospace', fontSize: 12,
+    padding: '6px 12px', cursor: 'pointer',
+  }
+
+  return (
+    <div ref={menuRef} style={{ position: 'relative' }}>
+      <button style={btnStyle} onClick={() => setOpen(!open)}>View</button>
+      {open && (
+        <div style={{
+          position: 'absolute', top: '100%', left: 0,
+          background: '#0d1b2a', border: '1px solid #2e5f8a',
+          borderRadius: 5, minWidth: 150,
+          boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+          zIndex: 100,
+        }}>
+          {viewOptions.map(({ id, label }) => (
+            <button key={id} style={menuItemStyle} onClick={() => onToggle(id)}>
+              <span style={{
+                width: 12, height: 12, border: '1px solid #4a9eda', borderRadius: 2,
+                background: viewOptions.find(o => o.id === id)?.visible ? '#4a9eda' : 'transparent',
+                flexShrink: 0,
+              }} />
+              {label}
+            </button>
+          ))}
         </div>
       )}
     </div>
@@ -152,7 +276,7 @@ function EditableTitle({ fileName, onRename }) {
   )
 }
 
-export default function Toolbar({ tool, onToolChange, fileName, onRename, onSave, onLoad, onNew, onLoadDemo }) {
+export default function Toolbar({ tool, onToolChange, selectFilter, onSelectFilterChange, viewOptions, onViewToggle, fileName, onRename, onSave, onLoad, onNew, onLoadDemo }) {
   return (
     <div
       style={{
@@ -175,31 +299,33 @@ export default function Toolbar({ tool, onToolChange, fileName, onRename, onSave
       <div style={{ width: 1, height: 24, background: '#1e3a54', margin: '0 8px' }} />
 
       <FileMenu onNew={onNew} onSave={onSave} onLoad={onLoad} onLoadDemo={onLoadDemo} />
+      <ViewMenu viewOptions={viewOptions} onToggle={onViewToggle} />
 
       <div style={{ width: 1, height: 24, background: '#1e3a54', margin: '0 8px' }} />
 
-      {TOOLS.map(({ id, label, shortcut, Icon }) => {
-        const active = tool === id
-        return (
-          <button
-            key={id}
-            onClick={() => onToolChange(id)}
-            title={`${label} (${shortcut})`}
-            style={{
-              ...btnStyle,
-              background: active ? '#1a3a5c' : 'transparent',
-              border: active ? '1px solid #2e5f8a' : '1px solid transparent',
-              color: active ? '#c8dff0' : '#7aabcc',
-            }}
-          >
-            <Icon active={active} />
-            {label}
-            <span style={{ fontSize: 9, color: active ? '#4a9eda' : '#2e5f8a', marginLeft: 2 }}>
-              {shortcut}
-            </span>
-          </button>
-        )
-      })}
+      {/* Pan tool */}
+      <button
+        onClick={() => onToolChange('pan')}
+        title="Pan (H)"
+        style={{
+          ...btnStyle,
+          background: tool === 'pan' ? '#1a3a5c' : 'transparent',
+          border: tool === 'pan' ? '1px solid #2e5f8a' : '1px solid transparent',
+          color: tool === 'pan' ? '#c8dff0' : '#7aabcc',
+        }}
+      >
+        <PanIcon active={tool === 'pan'} />
+        Pan
+        <span style={{ fontSize: 9, color: tool === 'pan' ? '#4a9eda' : '#2e5f8a', marginLeft: 2 }}>H</span>
+      </button>
+
+      {/* Select tool with filter dropdown */}
+      <SelectMenu
+        tool={tool}
+        onToolChange={onToolChange}
+        selectFilter={selectFilter}
+        onSelectFilterChange={onSelectFilterChange}
+      />
     </div>
   )
 }

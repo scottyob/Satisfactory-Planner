@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { PANEL_WIDTH, CELL_SIZE } from './constants'
 import BUILDINGS, { BUILDINGS_BY_KEY } from './buildings.js'
 import { RECIPES_BY_ID } from './recipes.js'
+import floorTextureUrl from './assets/floor.png'
 
 // ─── Connectors data ─────────────────────────────────────────────────────────
 
@@ -53,6 +54,35 @@ const CONNECTORS = [
 ]
 
 export const CONNECTORS_BY_KEY = Object.fromEntries(CONNECTORS.map(c => [c.key, c]))
+
+// ─── Foundations data ─────────────────────────────────────────────────────────
+
+// In Satisfactory, 1 foundation = 8m × 8m footprint (8 grid cells each side)
+export const FOUNDATIONS = [
+  {
+    key:     'foundation_1x1',
+    label:   '1×1 Foundation',
+    color:   '#8a7a5a',
+    w:       8,
+    h:       8,
+    inputs:  [],
+    outputs: [],
+    isFoundation: true,
+  },
+  {
+    key:     'foundation_half_1x1',
+    label:   '½×1 Foundation',
+    color:   '#8a7a5a',
+    w:       4,
+    h:       8,
+    inputs:  [],
+    outputs: [],
+    isFoundation: true,
+  },
+]
+
+export const FOUNDATIONS_BY_KEY = Object.fromEntries(FOUNDATIONS.map(f => [f.key, f]))
+export { floorTextureUrl }
 
 // ─── Layer state hook ────────────────────────────────────────────────────────
 
@@ -371,6 +401,140 @@ function ConnectorsTab({ onAddBuilding }) {
   )
 }
 
+function FoundationListItem({ def, onAdd }) {
+  const [hovered, setHovered] = useState(false)
+  const scale = 20 / Math.max(def.w, def.h)
+  const pw = def.w * scale
+  const ph = def.h * scale
+
+  return (
+    <div
+      title={`${def.label} (${def.w} × ${def.h} cells)`}
+      onClick={() => onAdd(def.key)}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 10,
+        padding: '8px 10px',
+        borderRadius: 4,
+        border: `1px solid ${hovered ? '#8a7a5a' : 'transparent'}`,
+        background: hovered ? '#0f2030' : 'transparent',
+        cursor: 'pointer',
+        transition: 'all 0.12s',
+        userSelect: 'none',
+      }}
+    >
+      {/* Floor texture preview */}
+      <div style={{
+        width: pw,
+        height: ph,
+        backgroundImage: `url(${floorTextureUrl})`,
+        backgroundSize: '100% 100%',
+        backgroundRepeat: 'no-repeat',
+        border: `1.5px solid ${hovered ? '#8a7a5a' : '#5a4a3a'}`,
+        borderRadius: 2,
+        flexShrink: 0,
+        imageRendering: 'pixelated',
+      }} />
+
+      <span style={{
+        flex: 1,
+        fontSize: 12,
+        color: hovered ? '#c8dff0' : '#7aabcc',
+        fontFamily: 'monospace',
+      }}>
+        {def.label}
+      </span>
+
+      <span style={{
+        fontSize: 10,
+        color: '#2e5f8a',
+        fontFamily: 'monospace',
+        flexShrink: 0,
+      }}>
+        {def.w} × {def.h}
+      </span>
+    </div>
+  )
+}
+
+function FoundationsTab({ onAddBuilding }) {
+  return (
+    <div style={{ padding: '4px 0', display: 'flex', flexDirection: 'column' }}>
+      {FOUNDATIONS.map(def => (
+        <FoundationListItem key={def.key} def={def} onAdd={onAddBuilding} />
+      ))}
+    </div>
+  )
+}
+
+// ─── Foundation color panel ──────────────────────────────────────────────────
+
+const QUICK_COLORS = [
+  { label: 'Concrete', color: '#8a7a5a' },
+  { label: 'Stone',    color: '#6a6a6a' },
+  { label: 'Dark',     color: '#2e2e2e' },
+  { label: 'Light',    color: '#c0b89a' },
+  { label: 'White',    color: '#d0cfc8' },
+  { label: 'Orange',   color: '#b84a10' },
+  { label: 'Yellow',   color: '#b89010' },
+  { label: 'Green',    color: '#2a7a38' },
+  { label: 'Teal',     color: '#1a6a6a' },
+  { label: 'Blue',     color: '#1a4a9a' },
+  { label: 'Purple',   color: '#6a1a9a' },
+  { label: 'Red',      color: '#8a1a1a' },
+]
+
+function FoundationColorPanel({ foundations, onChangeColor, compact = false }) {
+  const currentColor = foundations[0]?.color ?? '#8a7a5a'
+  const count = foundations.length
+
+  return (
+    <div style={{ padding: compact ? 0 : '8px 12px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {count > 1 && (
+        <div style={{ color: '#7aabcc', fontFamily: 'monospace', fontSize: 10 }}>
+          {count} foundations selected
+        </div>
+      )}
+      <div style={{ color: '#7aabcc', fontFamily: 'monospace', fontSize: 9, fontWeight: 700, letterSpacing: 1 }}>COLOR</div>
+
+      {/* Quick color swatches */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+        {QUICK_COLORS.map(({ label, color }) => (
+          <div
+            key={color}
+            title={label}
+            onClick={() => onChangeColor(foundations.map(f => f.id), color)}
+            style={{
+              width: 22, height: 22,
+              background: color,
+              borderRadius: 4,
+              cursor: 'pointer',
+              border: `2px solid ${currentColor === color ? '#4a9eda' : 'rgba(255,255,255,0.12)'}`,
+              boxSizing: 'border-box',
+              transition: 'border-color 0.1s',
+            }}
+          />
+        ))}
+      </div>
+
+      {/* Custom color picker */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{ color: '#7aabcc', fontFamily: 'monospace', fontSize: 10 }}>Custom</span>
+        <input
+          type="color"
+          value={currentColor}
+          onChange={e => onChangeColor(foundations.map(f => f.id), e.target.value)}
+          style={{ width: 36, height: 22, border: '1px solid #2e5f8a', borderRadius: 3, padding: 2, background: '#0d1b2a', cursor: 'pointer' }}
+        />
+        <span style={{ color: '#4a7fa5', fontFamily: 'monospace', fontSize: 10 }}>{currentColor.toUpperCase()}</span>
+      </div>
+    </div>
+  )
+}
+
 // ─── Info panel ──────────────────────────────────────────────────────────────
 
 function ItemIcon({ item, size = 26 }) {
@@ -616,8 +780,13 @@ function BeltGroupStats({ group, flowByBelt }) {
   )
 }
 
-function InfoPanel({ obj, selectedBeltGroup, objects, buildingErrors, portActualIn, flowByBelt, itemByBelt, belts }) {
-  const def    = obj ? (BUILDINGS_BY_KEY[obj.type] ?? CONNECTORS_BY_KEY[obj.type]) : null
+function InfoPanel({ obj, selectedObjIds, selectedBeltGroup, objects, buildingErrors, portActualIn, flowByBelt, itemByBelt, belts, onChangeFoundationColor }) {
+  const def    = obj ? (BUILDINGS_BY_KEY[obj.type] ?? CONNECTORS_BY_KEY[obj.type] ?? FOUNDATIONS_BY_KEY[obj.type]) : null
+
+  // Collect all currently-selected foundation objects
+  const selectedFoundations = selectedObjIds
+    ? [...selectedObjIds].map(id => objects.find(o => o.id === id)).filter(o => o && FOUNDATIONS_BY_KEY[o.type])
+    : (obj && FOUNDATIONS_BY_KEY[obj.type] ? [obj] : [])
   const recipe = obj?.recipeId ? RECIPES_BY_ID[obj.recipeId] : null
   const factor = obj?.clockSpeed ?? 1
   const pct    = Math.round(factor * 100)
@@ -638,6 +807,8 @@ function InfoPanel({ obj, selectedBeltGroup, objects, buildingErrors, portActual
 
   const subtitle = obj
     ? (def?.label ?? obj.type)
+    : selectedFoundations.length > 1
+    ? `${selectedFoundations.length} Foundations`
     : selectedBeltGroup
     ? 'Belt Group'
     : 'Factory'
@@ -653,8 +824,13 @@ function InfoPanel({ obj, selectedBeltGroup, objects, buildingErrors, portActual
         <span style={{ color: '#4a9eda', fontFamily: 'monospace', fontSize: 10 }}>{subtitle}</span>
       </div>
 
-      {/* No building, no belt selected — factory stats */}
-      {!obj && !selectedBeltGroup && <FactoryStats objects={objects} portActualIn={portActualIn} />}
+      {/* Multiple foundations selected — color panel only */}
+      {!obj && selectedFoundations.length > 0 && (
+        <FoundationColorPanel foundations={selectedFoundations} onChangeColor={onChangeFoundationColor} />
+      )}
+
+      {/* No building, no belt, no foundations selected — factory stats */}
+      {!obj && !selectedBeltGroup && selectedFoundations.length === 0 && <FactoryStats objects={objects} portActualIn={portActualIn} />}
 
       {/* Single belt selected — belt group stats */}
       {!obj && selectedBeltGroup && <BeltGroupStats group={selectedBeltGroup} flowByBelt={flowByBelt} />}
@@ -672,6 +848,11 @@ function InfoPanel({ obj, selectedBeltGroup, objects, buildingErrors, portActual
                 </span>
               )}
             </div>
+          )}
+
+          {/* Foundation color picker */}
+          {FOUNDATIONS_BY_KEY[obj.type] && (
+            <FoundationColorPanel foundations={[obj]} onChangeColor={onChangeFoundationColor} compact />
           )}
 
           {/* Floor input info */}
@@ -771,13 +952,15 @@ function InfoPanel({ obj, selectedBeltGroup, objects, buildingErrors, portActual
 // ─── Main panel ──────────────────────────────────────────────────────────────
 
 const TABS = [
-  { id: 'buildings', label: 'Buildings' },
-  { id: 'connectors', label: 'Connectors' },
+  { id: 'buildings',    label: 'Buildings'   },
+  { id: 'connectors',  label: 'Connectors'  },
+  { id: 'foundations', label: 'Foundations' },
 ]
 
 export default function LayersPanel({
   layers, selectedId, onSelect, onToggleVisible, onRename, onAdd, onDelete, onReorder, onAddBuilding,
-  selectedObj, objects, selectedBeltGroup, buildingErrors, portActualIn, flowByBelt, itemByBelt, belts,
+  selectedObj, selectedObjIds, objects, selectedBeltGroup, buildingErrors, portActualIn, flowByBelt, itemByBelt, belts,
+  onChangeFoundationColor,
 }) {
   const [dragId, setDragId]     = useState(null)
   const [dragOverId, setDragOverId] = useState(null)
@@ -905,7 +1088,7 @@ export default function LayersPanel({
       {/* ── Info panel — centered in free space ── */}
       <div style={{ flex: 1, display: 'flex', alignItems: 'center', padding: '12px 0' }}>
         <div style={{ width: '100%' }}>
-          <InfoPanel obj={selectedObj} selectedBeltGroup={selectedBeltGroup} objects={objects} buildingErrors={buildingErrors} portActualIn={portActualIn} flowByBelt={flowByBelt} itemByBelt={itemByBelt} belts={belts} />
+          <InfoPanel obj={selectedObj} selectedObjIds={selectedObjIds} selectedBeltGroup={selectedBeltGroup} objects={objects} buildingErrors={buildingErrors} portActualIn={portActualIn} flowByBelt={flowByBelt} itemByBelt={itemByBelt} belts={belts} onChangeFoundationColor={onChangeFoundationColor} />
         </div>
       </div>
 
@@ -936,9 +1119,9 @@ export default function LayersPanel({
                   color: active ? '#c8dff0' : '#4a7fa5',
                   cursor: 'pointer',
                   fontFamily: 'monospace',
-                  fontSize: 11,
+                  fontSize: 10,
                   padding: '7px 0',
-                  letterSpacing: '0.05em',
+                  letterSpacing: '0.03em',
                   transition: 'all 0.1s',
                 }}
               >
@@ -955,6 +1138,9 @@ export default function LayersPanel({
           )}
           {activeTab === 'connectors' && (
             <ConnectorsTab onAddBuilding={onAddBuilding} />
+          )}
+          {activeTab === 'foundations' && (
+            <FoundationsTab onAddBuilding={onAddBuilding} />
           )}
         </div>
       </div>
