@@ -524,7 +524,7 @@ function usePulse(active) {
 }
 
 export default function BuildingObject({
-  obj, isSelected, isError, errorReasons, canDrag,
+  obj, isSelected, isError, errorReasons, isClogged, clogReasons, canDrag,
   onPointerDown, onDragStart, onDragMove, onDragEnd,
   onPortMouseDown, occupiedOutputs, occupiedInputs, pendingBeltType,
   onDblClick, onShowTooltip, onHideTooltip,
@@ -533,6 +533,7 @@ export default function BuildingObject({
   const lastClickRef  = useRef(0)
   const cancelDragRef = useRef(false)
   const pulseOpacity  = usePulse(!!isError)
+  const clogOpacity   = usePulse(!!isClogged)
 
   const def   = ALL_BUILDINGS_BY_KEY[obj.type]
   if (!def) return null
@@ -726,6 +727,30 @@ export default function BuildingObject({
             text="!" align="center" verticalAlign="middle"
             fontSize={24} fontFamily="monospace" fontStyle="bold"
             fill="white" opacity={pulseOpacity} listening={false}
+          />
+        </Group>
+      )}
+
+      {/* Clog indicator — pulsing amber circle, half floating off top-left corner */}
+      {isClogged && (
+        <Group
+          x={-hw} y={-hh}
+          listening={true}
+          onMouseEnter={() => {
+            const content = [
+              { text: '~ Clogged output', color: '#f5a623' },
+              ...(clogReasons ?? []).map(r => ({ text: `• ${r}`, color: '#ffd080' })),
+            ]
+            onShowTooltip?.(content)
+          }}
+          onMouseLeave={() => onHideTooltip?.()}
+        >
+          <Circle radius={20} fill="#9a5f00" opacity={clogOpacity} />
+          <Text
+            x={-20} y={-20} width={40} height={40}
+            text="~" align="center" verticalAlign="middle"
+            fontSize={24} fontFamily="monospace" fontStyle="bold"
+            fill="#f5a623" opacity={clogOpacity} listening={false}
           />
         </Group>
       )}

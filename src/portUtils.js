@@ -62,8 +62,14 @@ export function computeBeltGroup(startBeltId, belts, objects, flowByBelt = null,
         const recipe = RECIPES_BY_ID[fromObj.recipeId]
         const out    = recipe?.outputs[belt.fromPortIdx]
         if (out) {
-          const rate = flowByBelt?.get(beltId) ?? out.perMin * (fromObj.clockSpeed ?? 1)
-          sources.push({ item: out.item, rate })
+          const clockSpeed      = fromObj.clockSpeed ?? 1
+          const effectiveFactor = (portActualIn && recipe.inputs.length > 0)
+            ? Math.min(1, ...recipe.inputs.map((inp, portIdx) => {
+                const req = inp.perMin * clockSpeed
+                return req > 0 ? (portActualIn.get(`${fromObj.id}:${portIdx}`) ?? 0) / req : 1
+              }))
+            : 1
+          sources.push({ item: out.item, rate: out.perMin * clockSpeed * effectiveFactor })
         }
       } else if (fromObj.type === 'floor_input' && fromObj.item) {
         // Always use configured production rate — belt may carry less due to backpressure,
@@ -115,27 +121,24 @@ function distributeSplitter(available, demands) {
 }
 
 /**
- * Simulate belt flow with backpressure:
- *   1. Backward pass  — propagate downstream demand toward sources
- *   2. Forward pass   — route supply only as far as it is demanded
+ * Simulate belt flow using iterative backward/forward passes until stable.
  *
- * Splitters redistribute excess capacity from low-demand outputs to high-demand ones.
- * Floor_inputs are throttled to actual demand (not configured rate) so belts reflect
- * steady-state flow; use `obj.ratePerMin` directly for configured-production figures.
+ * All machines start at max production rate. A machine scales back proportionally
+ * when it lacks input supply (starved) or output capacity (backed up). Splitters and
+ * mergers are passive routers. Belt tiers cap throughput. Iterates until convergence.
  *
  * Returns:
- *   flowByBelt   — Map<beltId, rate>
- *   itemByBelt   — Map<beltId, itemString>
- *   portActualIn — Map<`${objId}:${portIdx}`, rate>  actual consumption at each input port
+ *   flowByBelt        — Map<beltId, rate>
+ *   itemByBelt        — Map<beltId, itemString>
+ *   portActualIn      — Map<`${objId}:${portIdx}`, rate>  actual consumption at each input port
+ *   machineStatus     — Map<objId, 'ok'|'starved'|'backed_up'>
+ *   machineClockSpeed — Map<objId, [0..1]>  simulated efficiency fraction
  */
 export function simulateBeltFlow(belts, objects) {
-  const objsById = Object.fromEntries(objects.map(o => [o.id, o]))
-  const capBelt  = (belt, rate) => {
-    const cap = belt.beltTier ? (BELT_SPEEDS[belt.beltTier] ?? Infinity) : Infinity
-    return Math.min(rate, cap)
-  }
+  const objsById  = Object.fromEntries(objects.map(o => [o.id, o]))
+  const beltCap   = (belt) => belt.beltTier ? (BELT_SPEEDS[belt.beltTier] ?? Infinity) : Infinity
 
-  // Index belts by object
+  // Build adjacency lists
   const inBeltsForObj  = {}
   const outBeltsForObj = {}
   for (const obj of objects) { inBeltsForObj[obj.id] = []; outBeltsForObj[obj.id] = [] }
@@ -144,127 +147,237 @@ export function simulateBeltFlow(belts, objects) {
     if (outBeltsForObj[belt.fromObjId]) outBeltsForObj[belt.fromObjId].push(belt)
   }
 
-  // Kahn's topological sort
+  // Belt lookup by port index for O(1) access
+  const inBeltByPort  = {}
+  const outBeltByPort = {}
+  for (const obj of objects) { inBeltByPort[obj.id] = {}; outBeltByPort[obj.id] = {} }
+  for (const belt of belts) {
+    if (inBeltByPort[belt.toObjId])    inBeltByPort[belt.toObjId][belt.toPortIdx]     = belt
+    if (outBeltByPort[belt.fromObjId]) outBeltByPort[belt.fromObjId][belt.fromPortIdx] = belt
+  }
+
+  // Topological sort (Kahn's algorithm)
   const inDegree = {}
   for (const obj of objects) inDegree[obj.id] = 0
   for (const belt of belts) { if (objsById[belt.toObjId]) inDegree[belt.toObjId]++ }
-  const topoQ = objects.filter(o => inDegree[o.id] === 0).map(o => o.id)
-  const order = []; const visited = new Set()
+  const topoQ   = objects.filter(o => inDegree[o.id] === 0).map(o => o.id)
+  const order   = []
+  const visited = new Set()
   while (topoQ.length > 0) {
     const id = topoQ.shift()
     if (visited.has(id)) continue
     visited.add(id); order.push(id)
     for (const belt of outBeltsForObj[id] ?? []) {
-      if (--inDegree[belt.toObjId] === 0) topoQ.push(belt.toObjId)
+      if (objsById[belt.toObjId] && --inDegree[belt.toObjId] === 0) topoQ.push(belt.toObjId)
     }
   }
 
-  // ── Backward pass: compute how much each belt's downstream can absorb ────────
-  const beltDemand = new Map() // beltId → rate demanded by downstream
+  // Initialize all edges at max throughput
+  const edgeFlow = new Map()
+  const edgeItem = new Map()
+  for (const belt of belts) edgeFlow.set(belt.id, beltCap(belt))
 
-  for (const id of [...order].reverse()) {
-    const obj      = objsById[id]; if (!obj) continue
-    const inBelts  = inBeltsForObj[id]  ?? []
-    const outBelts = outBeltsForObj[id] ?? []
-
-    if (obj.type === 'floor_input') {
-      // Source — nothing upstream to inform
-    } else if (obj.type === 'floor_output') {
-      for (const b of inBelts) beltDemand.set(b.id, capBelt(b, Infinity))
-    } else if (obj.type === 'splitter') {
-      const totalOut = outBelts.reduce((s, b) => s + (beltDemand.get(b.id) ?? 0), 0)
-      for (const b of inBelts) beltDemand.set(b.id, totalOut)
-    } else if (obj.type === 'merger' || obj.type === 'connection_point') {
-      const totalOut = outBelts.reduce((s, b) => s + (beltDemand.get(b.id) ?? 0), 0)
-      for (const b of inBelts) beltDemand.set(b.id, totalOut)
-    } else if (BUILDINGS_BY_KEY[obj.type]) {
-      const recipe    = obj.recipeId ? RECIPES_BY_ID[obj.recipeId] : null
-      const clockSpeed = obj.clockSpeed ?? 1
-      for (const b of inBelts) {
-        const inp = recipe?.inputs[b.toPortIdx]
-        beltDemand.set(b.id, inp ? inp.perMin * clockSpeed : 0)
-      }
-      // Production buildings don't propagate output demand back to their inputs
-    }
+  // Initialize machine simulated clock speeds at 1.0 (full speed)
+  const machineClockSpeed = new Map()
+  const machineStatus     = new Map()
+  for (const obj of objects) {
+    if (BUILDINGS_BY_KEY[obj.type] && obj.recipeId) machineClockSpeed.set(obj.id, 1.0)
   }
 
-  // ── Forward pass: route supply constrained by demand ─────────────────────────
-  const flowByBelt   = new Map()
-  const itemByBelt   = new Map()
-  const portActualIn = new Map()
+  const MAX_ITER = 20
 
-  for (const id of order) {
-    const obj      = objsById[id]; if (!obj) continue
-    const inBelts  = inBeltsForObj[id]  ?? []
-    const outBelts = outBeltsForObj[id] ?? []
-    const totalIn  = () => inBelts.reduce((s, b) => s + (flowByBelt.get(b.id) ?? 0), 0)
-    const inItems  = () => [...new Set(inBelts.map(b => itemByBelt.get(b.id)).filter(Boolean))]
+  for (let iter = 0; iter < MAX_ITER; iter++) {
+    const prevFlow = new Map(edgeFlow)
 
-    if (obj.type === 'floor_input') {
-      const supply = obj.ratePerMin ?? 60
-      for (const b of outBelts) {
-        flowByBelt.set(b.id, capBelt(b, Math.min(supply, beltDemand.get(b.id) ?? Infinity)))
-        itemByBelt.set(b.id, obj.item ?? null)
-      }
+    // ── Backward pass (reverse topo order): propagate demand from sinks to sources ──
+    for (const id of [...order].reverse()) {
+      const obj      = objsById[id]; if (!obj) continue
+      const inBelts  = inBeltsForObj[id]  ?? []
+      const outBelts = outBeltsForObj[id] ?? []
 
-    } else if (obj.type === 'splitter') {
-      const available = totalIn()
-      const items     = inItems()
-      if (outBelts.length > 0) {
-        const demands   = outBelts.map(b => capBelt(b, beltDemand.get(b.id) ?? 0))
-        const allocated = distributeSplitter(available, demands)
-        for (let i = 0; i < outBelts.length; i++) {
-          flowByBelt.set(outBelts[i].id, allocated[i])
-          if (items.length === 1) itemByBelt.set(outBelts[i].id, items[0])
+      if (obj.type === 'floor_input') {
+        // Pure source — nothing to propagate backward
+
+      } else if (obj.type === 'floor_output') {
+        // Sink — demand up to belt capacity on each input
+        for (const b of inBelts) edgeFlow.set(b.id, beltCap(b))
+
+      } else if (obj.type === 'splitter') {
+        // Input demand = sum of all output demands
+        const totalOutDemand = outBelts.reduce((s, b) => s + (edgeFlow.get(b.id) ?? 0), 0)
+        for (const b of inBelts) edgeFlow.set(b.id, Math.min(beltCap(b), totalOutDemand))
+
+      } else if (obj.type === 'merger' || obj.type === 'connection_point') {
+        // Signal the full outgoing demand to every input belt (capped by that belt's capacity).
+        // Each input should try to supply as much as needed — the forward pass caps the actual
+        // total via min(beltCap, totalIn, outDemand). Dividing by N would under-signal demand
+        // through cascaded merger chains, causing incorrect flow starvation.
+        const totalOutDemand = outBelts.reduce((s, b) => s + (edgeFlow.get(b.id) ?? 0), 0)
+        for (const b of inBelts) {
+          edgeFlow.set(b.id, Math.min(beltCap(b), totalOutDemand))
         }
-      }
 
-    } else if (obj.type === 'merger' || obj.type === 'connection_point') {
-      const sum      = totalIn()
-      const outDemand = outBelts.reduce((s, b) => s + (beltDemand.get(b.id) ?? 0), 0)
-      const items    = inItems()
-      for (const b of outBelts) {
-        flowByBelt.set(b.id, capBelt(b, Math.min(sum, outDemand)))
-        if (items.length === 1) itemByBelt.set(b.id, items[0])
-      }
-
-    } else if (BUILDINGS_BY_KEY[obj.type]) {
-      const recipe     = obj.recipeId ? RECIPES_BY_ID[obj.recipeId] : null
-      const clockSpeed = obj.clockSpeed ?? 1
-      for (const b of inBelts) {
-        const demanded      = beltDemand.get(b.id) ?? 0
-        const rawFlow       = Math.min(flowByBelt.get(b.id) ?? 0, demanded)
-        const expectedItem  = recipe?.inputs[b.toPortIdx]?.item
-        const actualItem    = itemByBelt.get(b.id)
-        const itemMismatch  = expectedItem && actualItem && actualItem !== expectedItem
-        if (itemMismatch) {
-          flowByBelt.set(b.id, 0)   // belt backs up — nothing accepted
-          portActualIn.set(`${id}:${b.toPortIdx}`, 0)
-        } else {
-          portActualIn.set(`${id}:${b.toPortIdx}`, rawFlow)
+      } else if (BUILDINGS_BY_KEY[obj.type] && obj.recipeId) {
+        const recipe    = RECIPES_BY_ID[obj.recipeId]; if (!recipe) continue
+        const userSpeed = obj.clockSpeed ?? 1
+        // Output capacity factor: how fast can we run given downstream demand?
+        // Use 1.0 (not machineClockSpeed) so the backward pass always signals the
+        // maximum possible demand — machineClockSpeed is only used for display.
+        let outCapFactor = 1
+        for (let i = 0; i < recipe.outputs.length; i++) {
+          const belt = outBeltByPort[id]?.[i]; if (!belt) continue  // unconnected = no constraint
+          const maxOut = recipe.outputs[i].perMin * userSpeed
+          if (maxOut > 0) outCapFactor = Math.min(outCapFactor, (edgeFlow.get(belt.id) ?? 0) / maxOut)
         }
-      }
-      if (recipe) {
-        let effectiveFactor = 1
+        const localSpeed = outCapFactor
+
+        // Signal demand to each connected input port
         for (let i = 0; i < recipe.inputs.length; i++) {
-          const required = recipe.inputs[i].perMin * clockSpeed
-          if (required > 0) effectiveFactor = Math.min(effectiveFactor, (portActualIn.get(`${id}:${i}`) ?? 0) / required)
+          const belt = inBeltByPort[id]?.[i]; if (!belt) continue
+          const demanded = recipe.inputs[i].perMin * userSpeed * localSpeed
+          edgeFlow.set(belt.id, Math.min(beltCap(belt), demanded))
         }
-        effectiveFactor = Math.max(0, Math.min(1, effectiveFactor))
+      }
+    }
+
+    // ── Forward pass (topo order): propagate supply from sources to sinks ──────
+    for (const id of order) {
+      const obj      = objsById[id]; if (!obj) continue
+      const inBelts  = inBeltsForObj[id]  ?? []
+      const outBelts = outBeltsForObj[id] ?? []
+
+      if (obj.type === 'floor_input') {
+        const supply = obj.ratePerMin ?? 60
         for (const b of outBelts) {
-          const out = recipe.outputs[b.fromPortIdx]
-          if (out) {
-            const outRate   = out.perMin * clockSpeed * effectiveFactor
-            const outDemand = beltDemand.get(b.id) ?? Infinity
-            flowByBelt.set(b.id, capBelt(b, Math.min(outRate, outDemand)))
-            itemByBelt.set(b.id, out.item)
+          // Cap by belt tier, configured supply, and downstream demand signal
+          edgeFlow.set(b.id, Math.min(beltCap(b), supply, edgeFlow.get(b.id) ?? Infinity))
+          edgeItem.set(b.id, obj.item ?? null)
+        }
+
+      } else if (obj.type === 'floor_output') {
+        // Sink — no outputs
+
+      } else if (obj.type === 'splitter') {
+        const available = inBelts.reduce((s, b) => s + (edgeFlow.get(b.id) ?? 0), 0)
+        const items     = [...new Set(inBelts.map(b => edgeItem.get(b.id)).filter(Boolean))]
+        if (outBelts.length > 0) {
+          const demands   = outBelts.map(b => Math.min(beltCap(b), edgeFlow.get(b.id) ?? 0))
+          const allocated = distributeSplitter(available, demands)
+          for (let i = 0; i < outBelts.length; i++) {
+            edgeFlow.set(outBelts[i].id, allocated[i])
+            if (items.length === 1) edgeItem.set(outBelts[i].id, items[0])
+          }
+        }
+
+      } else if (obj.type === 'merger' || obj.type === 'connection_point') {
+        const totalIn   = inBelts.reduce((s, b) => s + (edgeFlow.get(b.id) ?? 0), 0)
+        const outDemand = outBelts.reduce((s, b) => s + (edgeFlow.get(b.id) ?? 0), 0)
+        const items     = [...new Set(inBelts.map(b => edgeItem.get(b.id)).filter(Boolean))]
+        for (const b of outBelts) {
+          edgeFlow.set(b.id, Math.min(beltCap(b), totalIn, outDemand))
+          if (items.length === 1) edgeItem.set(b.id, items[0])
+        }
+
+      } else if (BUILDINGS_BY_KEY[obj.type] && obj.recipeId) {
+        const recipe    = RECIPES_BY_ID[obj.recipeId]; if (!recipe) continue
+        const userSpeed = obj.clockSpeed ?? 1
+
+        // Input supply factor: how fast can we run given what upstream provides?
+        // Use inSupplyFactor directly — machineClockSpeed is only for display.
+        let inSupplyFactor = 1
+        for (let i = 0; i < recipe.inputs.length; i++) {
+          const inp   = recipe.inputs[i]
+          const belt  = inBeltByPort[id]?.[i]
+          const maxIn = inp.perMin * userSpeed
+          if (maxIn > 0) {
+            if (!belt) {
+              inSupplyFactor = 0  // required input port not connected
+            } else {
+              const actualItem = edgeItem.get(belt.id)
+              if (actualItem && actualItem !== inp.item) {
+                inSupplyFactor = 0  // wrong item on belt
+              } else {
+                inSupplyFactor = Math.min(inSupplyFactor, (edgeFlow.get(belt.id) ?? 0) / maxIn)
+              }
+            }
+          }
+        }
+        const localSpeed = inSupplyFactor
+
+        // Push supply to each connected output port
+        for (let i = 0; i < recipe.outputs.length; i++) {
+          const belt = outBeltByPort[id]?.[i]; if (!belt) continue
+          const outRate = recipe.outputs[i].perMin * userSpeed * localSpeed
+          edgeFlow.set(belt.id, Math.min(beltCap(belt), outRate))
+          edgeItem.set(belt.id, recipe.outputs[i].item)
+        }
+      }
+    }
+
+    // ── Resolve machines: set clock speeds and status tags ─────────────────────
+    for (const id of order) {
+      const obj = objsById[id]; if (!obj) continue
+      if (!BUILDINGS_BY_KEY[obj.type] || !obj.recipeId) continue
+      const recipe    = RECIPES_BY_ID[obj.recipeId]; if (!recipe) continue
+      const userSpeed = obj.clockSpeed ?? 1
+
+      let inputFactor = 1
+      for (let i = 0; i < recipe.inputs.length; i++) {
+        const inp   = recipe.inputs[i]
+        const belt  = inBeltByPort[id]?.[i]
+        const maxIn = inp.perMin * userSpeed
+        if (maxIn > 0) {
+          if (!belt) {
+            inputFactor = 0
+          } else {
+            const actualItem = edgeItem.get(belt.id)
+            if (actualItem && actualItem !== inp.item) {
+              inputFactor = 0
+            } else {
+              inputFactor = Math.min(inputFactor, (edgeFlow.get(belt.id) ?? 0) / maxIn)
+            }
           }
         }
       }
+
+      let outputFactor = 1  // unconnected outputs don't constrain
+      for (let i = 0; i < recipe.outputs.length; i++) {
+        const belt   = outBeltByPort[id]?.[i]; if (!belt) continue
+        const maxOut = recipe.outputs[i].perMin * userSpeed
+        if (maxOut > 0) outputFactor = Math.min(outputFactor, (edgeFlow.get(belt.id) ?? 0) / maxOut)
+      }
+
+      machineClockSpeed.set(id, Math.max(0, Math.min(1, Math.min(inputFactor, outputFactor))))
+
+      if (inputFactor < outputFactor - 1e-6)      machineStatus.set(id, 'starved')
+      else if (outputFactor < inputFactor - 1e-6) machineStatus.set(id, 'backed_up')
+      else                                         machineStatus.set(id, 'ok')
+    }
+
+    // Convergence check
+    let maxDiff = 0
+    for (const [id, f] of edgeFlow) maxDiff = Math.max(maxDiff, Math.abs(f - (prevFlow.get(id) ?? 0)))
+    if (maxDiff < 1e-6) break
+  }
+
+  // Build portActualIn for backward compatibility with App.jsx error detection
+  const portActualIn = new Map()
+  for (const obj of objects) {
+    if (!BUILDINGS_BY_KEY[obj.type] || !obj.recipeId) continue
+    const recipe = RECIPES_BY_ID[obj.recipeId]; if (!recipe) continue
+    for (let i = 0; i < recipe.inputs.length; i++) {
+      const inp  = recipe.inputs[i]
+      const belt = inBeltByPort[obj.id]?.[i]
+      if (!belt) {
+        portActualIn.set(`${obj.id}:${i}`, 0)
+      } else {
+        const actualItem = edgeItem.get(belt.id)
+        portActualIn.set(`${obj.id}:${i}`, (actualItem && actualItem !== inp.item) ? 0 : (edgeFlow.get(belt.id) ?? 0))
+      }
     }
   }
 
-  return { flowByBelt, itemByBelt, portActualIn }
+  return { flowByBelt: edgeFlow, itemByBelt: edgeItem, portActualIn, machineStatus, machineClockSpeed }
 }
 
 /**

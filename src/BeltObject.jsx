@@ -10,7 +10,7 @@ const CHEVRON_COLOR = '#e8a013'
 const BELT_H        = CELL_SIZE * 2  // total height of belt rect
 const CHEVRON_SPEED = 0.08           // px per animation frame
 
-export default function BeltObject({ belt, objects, isSelected, onMouseDown, onDblClick, onBeltHover, onBeltLeave }) {
+export default function BeltObject({ belt, objects, isSelected, flowStatus, onMouseDown, onDblClick, onBeltHover, onBeltLeave }) {
   const offsetRef = useRef(0)
   const shapeRef  = useRef(null)
 
@@ -53,6 +53,8 @@ export default function BeltObject({ belt, objects, isSelected, onMouseDown, onD
   const hw      = BELT_H / 2     // half-height of belt
   const halfLen = len / 2
 
+  const warnColor = flowStatus === 'excess' ? '#f5a623' : '#e87c7c'
+
   return (
     <Group x={mx} y={my} rotation={angle}>
       {/* Belt body */}
@@ -62,8 +64,8 @@ export default function BeltObject({ belt, objects, isSelected, onMouseDown, onD
         width={len}
         height={BELT_H}
         fill={BELT_FILL}
-        stroke={isSelected ? BELT_SELECTED : BELT_BORDER}
-        strokeWidth={isSelected ? 2 : 1}
+        stroke={isSelected ? BELT_SELECTED : flowStatus ? warnColor : BELT_BORDER}
+        strokeWidth={isSelected ? 2 : flowStatus ? 1.5 : 1}
         cornerRadius={2}
         onMouseDown={onMouseDown}
         onDblClick={onDblClick}
@@ -72,27 +74,51 @@ export default function BeltObject({ belt, objects, isSelected, onMouseDown, onD
         listening={true}
       />
 
-      {/* Animated chevrons — drawn directly on canvas each frame, no React state */}
+      {/* Pulsing warning border overlay — driven by rAF via sceneFunc/Date.now() */}
+      {flowStatus && (
+        <Shape
+          listening={false}
+          sceneFunc={(ctx) => {
+            const phase = Date.now() / 1000
+            const alpha = 0.25 + 0.35 * (Math.sin(phase * Math.PI * 2) * 0.5 + 0.5)
+            ctx.save()
+            ctx.strokeStyle = warnColor
+            ctx.lineWidth   = 2.5
+            ctx.globalAlpha = alpha
+            ctx.beginPath()
+            ctx.rect(-halfLen, -hw, len, BELT_H)
+            ctx.stroke()
+            ctx.restore()
+          }}
+        />
+      )}
+
+      {/* Animated chevrons — color and opacity driven by flowStatus + rAF/Date.now() */}
       <Shape
         ref={shapeRef}
         listening={false}
-        stroke={CHEVRON_COLOR}
-        strokeWidth={0.8}
-        fill="transparent"
-        lineCap="round"
-        lineJoin="round"
-        opacity={0.45}
-        sceneFunc={(ctx, shape) => {
+        sceneFunc={(ctx) => {
           const offset  = offsetRef.current
           const spacing = CELL_SIZE * 2
-          const aw = CELL_SIZE * 0.15  // how far back each chevron wing extends
-          const ah = hw * 0.18         // chevron half-height
+          const aw = CELL_SIZE * 0.15
+          const ah = hw * 0.18
           const rows = [
             { y: -hw * 0.48, xShift: 0 },
             { y: -hw * 0.16, xShift: spacing / 2 },
             { y:  hw * 0.16, xShift: 0 },
             { y:  hw * 0.48, xShift: spacing / 2 },
           ]
+          const phase   = Date.now() / 1000
+          const opacity = flowStatus
+            ? 0.4 + 0.6 * (Math.sin(phase * Math.PI * 2) * 0.5 + 0.5)
+            : 0.45
+          const color = flowStatus ? warnColor : CHEVRON_COLOR
+          ctx.save()
+          ctx.strokeStyle = color
+          ctx.lineWidth   = 0.8
+          ctx.lineCap     = 'round'
+          ctx.lineJoin    = 'round'
+          ctx.globalAlpha = opacity
           ctx.beginPath()
           for (const { y: rowY, xShift } of rows) {
             const start = ((offset + xShift) % spacing) - halfLen
@@ -102,7 +128,8 @@ export default function BeltObject({ belt, objects, isSelected, onMouseDown, onD
               ctx.lineTo(x - aw, rowY + ah)
             }
           }
-          ctx.fillStrokeShape(shape)
+          ctx.stroke()
+          ctx.restore()
         }}
       />
     </Group>

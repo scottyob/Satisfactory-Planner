@@ -449,7 +449,7 @@ export default function App() {
       content.push(Math.abs(diff) < 0.01
         ? { text: '  ✓ balanced', color: '#5ee877' }
         : diff > 0
-          ? { text: `  ▲ +${fmt(diff)} surplus`, color: '#5ee877' }
+          ? { text: `  ▲ +${fmt(diff)} excess`, color: '#f5a623' }
           : { text: `  ▼ −${fmt(Math.abs(diff))} deficit`, color: '#e87c7c' }
       )
     })
@@ -1172,6 +1172,130 @@ export default function App() {
     return errors
   }, [objects, belts, portActualIn, itemByBelt])
 
+  // ── Belt flow status ──────────────────────────────────────────────────────
+  // 'deficit'  — destination input is undersupplied
+  // 'excess'   — source output is throttled by downstream
+  // Status propagates across entire connected network (through splitters/mergers/connection_points).
+
+  const beltStatuses = useMemo(() => {
+    const objById        = new Map(objects.map(o => [o.id, o]))
+    const PASS_THROUGH   = new Set(['connection_point', 'splitter', 'merger'])
+
+    // ── Step 1: compute raw per-belt status ──────────────────────────────────
+    const rawStatus = new Map()
+    for (const belt of belts) {
+      // Deficit: destination building needs more than belt carries
+      const toObj = objById.get(belt.toObjId)
+      if (toObj?.recipeId) {
+        const recipe = RECIPES_BY_ID[toObj.recipeId]
+        if (recipe && belt.toPortIdx < recipe.inputs.length) {
+          const required = recipe.inputs[belt.toPortIdx].perMin * (toObj.clockSpeed ?? 1)
+          const actual   = flowByBelt.get(belt.id) ?? 0
+          if (required - actual > 0.01) { rawStatus.set(belt.id, 'deficit'); continue }
+        }
+      }
+      // Excess: source building produces more than belt carries
+      const fromObj = objById.get(belt.fromObjId)
+      if (fromObj?.recipeId) {
+        const recipe = RECIPES_BY_ID[fromObj.recipeId]
+        if (recipe && belt.fromPortIdx < recipe.outputs.length) {
+          const clockSpeed      = fromObj.clockSpeed ?? 1
+          const effectiveFactor = recipe.inputs.length > 0
+            ? Math.min(1, ...recipe.inputs.map((inp, portIdx) => {
+                const req = inp.perMin * clockSpeed
+                return req > 0 ? (portActualIn.get(`${fromObj.id}:${portIdx}`) ?? 0) / req : 1
+              }))
+            : 1
+          const theoreticalOut = recipe.outputs[belt.fromPortIdx].perMin * clockSpeed * effectiveFactor
+          const actual         = flowByBelt.get(belt.id) ?? 0
+          if (theoreticalOut - actual > 0.01) rawStatus.set(belt.id, 'excess')
+        }
+      }
+    }
+
+    // ── Step 2: union-find to group belts into networks ──────────────────────
+    // Two belts belong to the same network when they share a pass-through building
+    // (splitter / merger / connection_point). Production buildings isolate networks.
+    const parent = new Map(belts.map(b => [b.id, b.id]))
+    const find = (id) => {
+      if (parent.get(id) !== id) parent.set(id, find(parent.get(id)))
+      return parent.get(id)
+    }
+    const union = (a, b) => parent.set(find(a), find(b))
+
+    // Group belt IDs by each pass-through building they touch
+    const beltsByNode = new Map() // objId → belt id[]
+    for (const belt of belts) {
+      for (const objId of [belt.fromObjId, belt.toObjId]) {
+        const obj = objById.get(objId)
+        if (obj && PASS_THROUGH.has(obj.type)) {
+          if (!beltsByNode.has(objId)) beltsByNode.set(objId, [])
+          beltsByNode.get(objId).push(belt.id)
+        }
+      }
+    }
+    for (const ids of beltsByNode.values()) {
+      for (let i = 1; i < ids.length; i++) union(ids[0], ids[i])
+    }
+
+    // ── Step 3: promote status to entire component (deficit beats excess) ────
+    const componentStatus = new Map() // root → status
+    for (const [beltId, status] of rawStatus) {
+      const root     = find(beltId)
+      const existing = componentStatus.get(root)
+      if (!existing || (existing === 'excess' && status === 'deficit')) {
+        componentStatus.set(root, status)
+      }
+    }
+
+    const statuses = new Map()
+    for (const belt of belts) {
+      const s = componentStatus.get(find(belt.id))
+      if (s) statuses.set(belt.id, s)
+    }
+    return statuses
+  }, [objects, belts, flowByBelt, portActualIn])
+
+  // ── Clog detection ────────────────────────────────────────────────────────
+  // Warn when a building's theoretical output exceeds what downstream can absorb.
+
+  const buildingClogs = useMemo(() => {
+    const fmt = (v) => (v % 1 === 0 ? String(v) : v.toFixed(1)) + '/min'
+    const clogs = new Map()
+    const beltByFromObjPort = {}
+    for (const b of belts) {
+      if (!beltByFromObjPort[b.fromObjId]) beltByFromObjPort[b.fromObjId] = {}
+      beltByFromObjPort[b.fromObjId][b.fromPortIdx] = b
+    }
+    for (const obj of objects) {
+      if (!BUILDINGS_BY_KEY[obj.type] || !obj.recipeId) continue
+      const recipe = RECIPES_BY_ID[obj.recipeId]
+      if (!recipe || recipe.outputs.length === 0) continue
+      const clockSpeed = obj.clockSpeed ?? 1
+      // effectiveFactor: how much of full-speed production is happening (limited by inputs)
+      const effectiveFactor = recipe.inputs.length > 0
+        ? Math.min(1, ...recipe.inputs.map((inp, portIdx) => {
+            const required = inp.perMin * clockSpeed
+            return required > 0 ? (portActualIn.get(`${obj.id}:${portIdx}`) ?? 0) / required : 1
+          }))
+        : 1
+      const portBelts = beltByFromObjPort[obj.id] ?? {}
+      const reasons = []
+      for (let portIdx = 0; portIdx < recipe.outputs.length; portIdx++) {
+        const out = recipe.outputs[portIdx]
+        const theoreticalOut = out.perMin * clockSpeed * effectiveFactor
+        if (theoreticalOut <= 0.01) continue
+        const belt = portBelts[portIdx]
+        if (!belt) continue  // unconnected output — separate concern
+        const actualOut = flowByBelt.get(belt.id) ?? 0
+        const excess = theoreticalOut - actualOut
+        if (excess > 0.01) reasons.push(`${out.item}: ${fmt(excess)} excess output`)
+      }
+      if (reasons.length > 0) clogs.set(obj.id, reasons)
+    }
+    return clogs
+  }, [objects, belts, portActualIn, flowByBelt])
+
   // ── Render ────────────────────────────────────────────────────────────────
 
   const layersReversed = [...layers].reverse()
@@ -1281,6 +1405,7 @@ export default function App() {
                       belt={belt}
                       objects={objects}
                       isSelected={selectedBeltIds.has(belt.id)}
+                      flowStatus={beltStatuses.get(belt.id) ?? null}
                       onMouseDown={(e) => handleBeltMouseDown(e, belt.id)}
                       onDblClick={(e) => handleBeltDblClick(e, belt.id)}
                       onBeltHover={() => handleBeltHover(belt.id)}
@@ -1295,6 +1420,8 @@ export default function App() {
                       isSelected={selectedObjIds.has(obj.id)}
                       isError={buildingErrors.has(obj.id)}
                       errorReasons={buildingErrors.get(obj.id) ?? []}
+                      isClogged={buildingClogs.has(obj.id)}
+                      clogReasons={buildingClogs.get(obj.id) ?? []}
                       onShowTooltip={showTooltip}
                       onHideTooltip={hideTooltip}
                       canDrag={tool === 'pointer' && (() => {

@@ -1,0 +1,489 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "id": 1,
+      "type": "floor_input",
+      "layerId": 1,
+      "rotation": 0,
+      "x": 3800,
+      "y": 5320,
+      "item": "Iron Ingot",
+      "ratePerMin": 120
+    },
+    {
+      "id": 2,
+      "type": "floor_input",
+      "layerId": 1,
+      "rotation": 0,
+      "x": 3800,
+      "y": 5520,
+      "item": "Iron Ingot",
+      "ratePerMin": 120
+    },
+    {
+      "id": 3,
+      "type": "constructor",
+      "layerId": 1,
+      "rotation": 270,
+      "x": 5280,
+      "y": 4240,
+      "recipeId": "ironPlate",
+      "clockSpeed": 0.5
+    },
+    {
+      "id": 4,
+      "type": "constructor",
+      "layerId": 1,
+      "rotation": 90,
+      "x": 4640,
+      "y": 4240,
+      "recipeId": "ironPlate",
+      "clockSpeed": 1
+    },
+    {
+      "id": 5,
+      "type": "merger",
+      "layerId": 1,
+      "rotation": 0,
+      "x": 4960,
+      "y": 4240
+    },
+    {
+      "id": 6,
+      "type": "constructor",
+      "layerId": 1,
+      "rotation": 270,
+      "x": 5280,
+      "y": 4560,
+      "recipeId": "ironPlate",
+      "clockSpeed": 1
+    },
+    {
+      "id": 7,
+      "type": "constructor",
+      "layerId": 1,
+      "rotation": 90,
+      "x": 4640,
+      "y": 4560,
+      "recipeId": "ironPlate",
+      "clockSpeed": 1
+    },
+    {
+      "id": 8,
+      "type": "merger",
+      "layerId": 1,
+      "rotation": 0,
+      "x": 4960,
+      "y": 4560
+    },
+    {
+      "id": 9,
+      "type": "constructor",
+      "layerId": 1,
+      "rotation": 90,
+      "x": 4640,
+      "y": 3920,
+      "recipeId": "ironPlate",
+      "clockSpeed": 1
+    },
+    {
+      "id": 10,
+      "type": "merger",
+      "layerId": 1,
+      "rotation": 0,
+      "x": 4960,
+      "y": 3920
+    },
+    {
+      "id": 12,
+      "type": "splitter",
+      "layerId": 1,
+      "rotation": 0,
+      "x": 4960,
+      "y": 4840
+    },
+    {
+      "id": 15,
+      "type": "splitter",
+      "layerId": 1,
+      "rotation": 0,
+      "x": 4320,
+      "y": 4560
+    },
+    {
+      "id": 17,
+      "type": "splitter",
+      "layerId": 1,
+      "rotation": 0,
+      "x": 4320,
+      "y": 4240
+    },
+    {
+      "id": 18,
+      "type": "connection_point",
+      "layerId": 1,
+      "rotation": 0,
+      "x": 4320,
+      "y": 4840
+    },
+    {
+      "id": 19,
+      "type": "connection_point",
+      "layerId": 1,
+      "rotation": 0,
+      "x": 4960,
+      "y": 3520
+    },
+    {
+      "id": 21,
+      "type": "splitter",
+      "layerId": 1,
+      "rotation": 0,
+      "x": 4320,
+      "y": 3920
+    },
+    {
+      "id": 23,
+      "type": "splitter",
+      "layerId": 1,
+      "rotation": 0,
+      "x": 5600,
+      "y": 4560
+    },
+    {
+      "id": 24,
+      "type": "connection_point",
+      "layerId": 1,
+      "rotation": 0,
+      "x": 5600,
+      "y": 4840
+    },
+    {
+      "id": 25,
+      "type": "connection_point",
+      "layerId": 1,
+      "rotation": 0,
+      "x": 5600,
+      "y": 4240
+    },
+    {
+      "id": 29,
+      "type": "floor_output",
+      "layerId": 1,
+      "rotation": 180,
+      "x": 5280,
+      "y": 3520
+    },
+    {
+      "id": 32,
+      "type": "constructor",
+      "layerId": 1,
+      "rotation": 90,
+      "x": 4320,
+      "y": 6000,
+      "recipeId": "ironRod",
+      "clockSpeed": 1
+    },
+    {
+      "id": 40,
+      "type": "constructor",
+      "layerId": 1,
+      "rotation": 90,
+      "x": 4320,
+      "y": 6320,
+      "recipeId": "ironRod",
+      "clockSpeed": 1
+    },
+    {
+      "id": 50,
+      "type": "constructor",
+      "layerId": 1,
+      "rotation": 90,
+      "x": 4320,
+      "y": 6640,
+      "recipeId": "ironRod",
+      "clockSpeed": 1
+    },
+    {
+      "id": 55,
+      "type": "splitter",
+      "layerId": 1,
+      "rotation": 90,
+      "x": 4000,
+      "y": 6320
+    },
+    {
+      "id": 57,
+      "type": "connection_point",
+      "layerId": 1,
+      "rotation": 0,
+      "x": 4000,
+      "y": 6000
+    },
+    {
+      "id": 59,
+      "type": "connection_point",
+      "layerId": 1,
+      "rotation": 0,
+      "x": 3840,
+      "y": 6320
+    },
+    {
+      "id": 60,
+      "type": "connection_point",
+      "layerId": 1,
+      "rotation": 0,
+      "x": 3840,
+      "y": 5760
+    },
+    {
+      "id": 66,
+      "type": "splitter",
+      "layerId": 1,
+      "rotation": 180,
+      "x": 4640,
+      "y": 5760
+    },
+    {
+      "id": 68,
+      "type": "constructor",
+      "layerId": 1,
+      "rotation": 270,
+      "x": 4960,
+      "y": 6000,
+      "recipeId": "ironRod",
+      "clockSpeed": 1
+    },
+    {
+      "id": 69,
+      "type": "constructor",
+      "layerId": 1,
+      "rotation": 270,
+      "x": 4960,
+      "y": 6320,
+      "recipeId": "ironRod",
+      "clockSpeed": 1
+    },
+    {
+      "id": 70,
+      "type": "constructor",
+      "layerId": 1,
+      "rotation": 270,
+      "x": 4960,
+      "y": 6640,
+      "recipeId": "ironRod",
+      "clockSpeed": 1
+    },
+    {
+      "id": 77,
+      "type": "constructor",
+      "layerId": 1,
+      "rotation": 90,
+      "x": 4320,
+      "y": 6960,
+      "recipeId": "ironRod",
+      "clockSpeed": 1
+    },
+    {
+      "id": 79,
+      "type": "splitter",
+      "layerId": 1,
+      "rotation": 180,
+      "x": 4000,
+      "y": 6640
+    },
+    {
+      "id": 80,
+      "type": "connection_point",
+      "layerId": 1,
+      "rotation": 0,
+      "x": 4000,
+      "y": 6960
+    },
+    {
+      "id": 82,
+      "type": "merger",
+      "layerId": 1,
+      "rotation": 180,
+      "x": 4640,
+      "y": 6640
+    },
+    {
+      "id": 84,
+      "type": "merger",
+      "layerId": 1,
+      "rotation": 180,
+      "x": 4640,
+      "y": 6960
+    },
+    {
+      "id": 86,
+      "type": "merger",
+      "layerId": 1,
+      "rotation": 180,
+      "x": 4640,
+      "y": 6320
+    },
+    {
+      "id": 88,
+      "type": "merger",
+      "layerId": 1,
+      "rotation": 180,
+      "x": 4640,
+      "y": 6000
+    },
+    {
+      "id": 93,
+      "type": "splitter",
+      "layerId": 1,
+      "rotation": 180,
+      "x": 5280,
+      "y": 6000
+    },
+    {
+      "id": 95,
+      "type": "splitter",
+      "layerId": 1,
+      "rotation": 180,
+      "x": 5280,
+      "y": 6320
+    },
+    {
+      "id": 96,
+      "type": "connection_point",
+      "layerId": 1,
+      "rotation": 0,
+      "x": 5280,
+      "y": 5760
+    },
+    {
+      "id": 97,
+      "type": "connection_point",
+      "layerId": 1,
+      "rotation": 0,
+      "x": 5280,
+      "y": 6640
+    },
+    {
+      "id": 105,
+      "type": "splitter",
+      "layerId": 1,
+      "rotation": 90,
+      "x": 4640,
+      "y": 5520
+    },
+    {
+      "id": 106,
+      "type": "connection_point",
+      "layerId": 1,
+      "rotation": 0,
+      "x": 5160,
+      "y": 5520
+    },
+    {
+      "id": 107,
+      "type": "connection_point",
+      "layerId": 1,
+      "rotation": 0,
+      "x": 4960,
+      "y": 5320
+    },
+    {
+      "id": 108,
+      "type": "merger",
+      "layerId": 1,
+      "rotation": 90,
+      "x": 5160,
+      "y": 4840
+    },
+    {
+      "id": 109,
+      "type": "floor_output",
+      "layerId": 1,
+      "rotation": 180,
+      "x": 5200,
+      "y": 7240
+    },
+    {
+      "id": 110,
+      "type": "connection_point",
+      "layerId": 1,
+      "rotation": 0,
+      "x": 4640,
+      "y": 7240
+    }
+  ],
+  "nextObjId": 111,
+  "belts": [
+    { "id": 2,   "layerId": 1, "fromObjId": 4,   "fromPortIdx": 0, "toObjId": 5,   "toPortIdx": 2 },
+    { "id": 4,   "layerId": 1, "fromObjId": 3,   "fromPortIdx": 0, "toObjId": 5,   "toPortIdx": 1 },
+    { "id": 5,   "layerId": 1, "fromObjId": 7,   "fromPortIdx": 0, "toObjId": 8,   "toPortIdx": 2 },
+    { "id": 6,   "layerId": 1, "fromObjId": 6,   "fromPortIdx": 0, "toObjId": 8,   "toPortIdx": 1 },
+    { "id": 8,   "layerId": 1, "fromObjId": 9,   "fromPortIdx": 0, "toObjId": 10,  "toPortIdx": 2 },
+    { "id": 10,  "layerId": 1, "fromObjId": 8,   "fromPortIdx": 0, "toObjId": 5,   "toPortIdx": 0 },
+    { "id": 12,  "layerId": 1, "fromObjId": 5,   "fromPortIdx": 0, "toObjId": 10,  "toPortIdx": 0 },
+    { "id": 24,  "layerId": 1, "fromObjId": 15,  "fromPortIdx": 1, "toObjId": 7,   "toPortIdx": 0 },
+    { "id": 26,  "layerId": 1, "fromObjId": 17,  "fromPortIdx": 1, "toObjId": 4,   "toPortIdx": 0 },
+    { "id": 29,  "layerId": 1, "fromObjId": 12,  "fromPortIdx": 2, "toObjId": 18,  "toPortIdx": 0 },
+    { "id": 30,  "layerId": 1, "fromObjId": 18,  "fromPortIdx": 0, "toObjId": 15,  "toPortIdx": 0 },
+    { "id": 32,  "layerId": 1, "fromObjId": 10,  "fromPortIdx": 0, "toObjId": 19,  "toPortIdx": 0 },
+    { "id": 34,  "layerId": 1, "fromObjId": 21,  "fromPortIdx": 1, "toObjId": 9,   "toPortIdx": 0 },
+    { "id": 36,  "layerId": 1, "fromObjId": 15,  "fromPortIdx": 0, "toObjId": 17,  "toPortIdx": 0 },
+    { "id": 38,  "layerId": 1, "fromObjId": 17,  "fromPortIdx": 0, "toObjId": 21,  "toPortIdx": 0 },
+    { "id": 42,  "layerId": 1, "fromObjId": 24,  "fromPortIdx": 0, "toObjId": 23,  "toPortIdx": 0 },
+    { "id": 44,  "layerId": 1, "fromObjId": 23,  "fromPortIdx": 2, "toObjId": 6,   "toPortIdx": 0 },
+    { "id": 47,  "layerId": 1, "fromObjId": 23,  "fromPortIdx": 0, "toObjId": 25,  "toPortIdx": 0 },
+    { "id": 48,  "layerId": 1, "fromObjId": 25,  "fromPortIdx": 0, "toObjId": 3,   "toPortIdx": 0 },
+    { "id": 56,  "layerId": 1, "fromObjId": 19,  "fromPortIdx": 0, "toObjId": 29,  "toPortIdx": 0 },
+    { "id": 92,  "layerId": 1, "fromObjId": 55,  "fromPortIdx": 0, "toObjId": 40,  "toPortIdx": 0 },
+    { "id": 101, "layerId": 1, "fromObjId": 55,  "fromPortIdx": 2, "toObjId": 57,  "toPortIdx": 0 },
+    { "id": 102, "layerId": 1, "fromObjId": 57,  "fromPortIdx": 0, "toObjId": 32,  "toPortIdx": 0 },
+    { "id": 108, "layerId": 1, "fromObjId": 59,  "fromPortIdx": 0, "toObjId": 55,  "toPortIdx": 0 },
+    { "id": 110, "layerId": 1, "fromObjId": 60,  "fromPortIdx": 0, "toObjId": 59,  "toPortIdx": 0 },
+    { "id": 136, "layerId": 1, "fromObjId": 55,  "fromPortIdx": 1, "toObjId": 79,  "toPortIdx": 0 },
+    { "id": 138, "layerId": 1, "fromObjId": 79,  "fromPortIdx": 2, "toObjId": 50,  "toPortIdx": 0 },
+    { "id": 141, "layerId": 1, "fromObjId": 79,  "fromPortIdx": 0, "toObjId": 80,  "toPortIdx": 0 },
+    { "id": 142, "layerId": 1, "fromObjId": 80,  "fromPortIdx": 0, "toObjId": 77,  "toPortIdx": 0 },
+    { "id": 144, "layerId": 1, "fromObjId": 32,  "fromPortIdx": 0, "toObjId": 88,  "toPortIdx": 1 },
+    { "id": 146, "layerId": 1, "fromObjId": 68,  "fromPortIdx": 0, "toObjId": 88,  "toPortIdx": 2 },
+    { "id": 148, "layerId": 1, "fromObjId": 69,  "fromPortIdx": 0, "toObjId": 86,  "toPortIdx": 2 },
+    { "id": 150, "layerId": 1, "fromObjId": 40,  "fromPortIdx": 0, "toObjId": 86,  "toPortIdx": 1 },
+    { "id": 152, "layerId": 1, "fromObjId": 88,  "fromPortIdx": 0, "toObjId": 86,  "toPortIdx": 0 },
+    { "id": 154, "layerId": 1, "fromObjId": 86,  "fromPortIdx": 0, "toObjId": 82,  "toPortIdx": 0 },
+    { "id": 156, "layerId": 1, "fromObjId": 50,  "fromPortIdx": 0, "toObjId": 82,  "toPortIdx": 1 },
+    { "id": 158, "layerId": 1, "fromObjId": 70,  "fromPortIdx": 0, "toObjId": 82,  "toPortIdx": 2 },
+    { "id": 160, "layerId": 1, "fromObjId": 82,  "fromPortIdx": 0, "toObjId": 84,  "toPortIdx": 0 },
+    { "id": 164, "layerId": 1, "fromObjId": 77,  "fromPortIdx": 0, "toObjId": 84,  "toPortIdx": 1 },
+    { "id": 172, "layerId": 1, "fromObjId": 66,  "fromPortIdx": 1, "toObjId": 60,  "toPortIdx": 0 },
+    { "id": 175, "layerId": 1, "fromObjId": 66,  "fromPortIdx": 2, "toObjId": 96,  "toPortIdx": 0 },
+    { "id": 176, "layerId": 1, "fromObjId": 96,  "fromPortIdx": 0, "toObjId": 93,  "toPortIdx": 0 },
+    { "id": 178, "layerId": 1, "fromObjId": 93,  "fromPortIdx": 0, "toObjId": 95,  "toPortIdx": 0 },
+    { "id": 181, "layerId": 1, "fromObjId": 95,  "fromPortIdx": 0, "toObjId": 97,  "toPortIdx": 0 },
+    { "id": 182, "layerId": 1, "fromObjId": 97,  "fromPortIdx": 0, "toObjId": 70,  "toPortIdx": 0 },
+    { "id": 184, "layerId": 1, "fromObjId": 95,  "fromPortIdx": 1, "toObjId": 69,  "toPortIdx": 0 },
+    { "id": 186, "layerId": 1, "fromObjId": 93,  "fromPortIdx": 1, "toObjId": 68,  "toPortIdx": 0 },
+    { "id": 208, "layerId": 1, "fromObjId": 2,   "fromPortIdx": 0, "toObjId": 105, "toPortIdx": 0 },
+    { "id": 210, "layerId": 1, "fromObjId": 105, "fromPortIdx": 1, "toObjId": 66,  "toPortIdx": 0 },
+    { "id": 212, "layerId": 1, "fromObjId": 105, "fromPortIdx": 0, "toObjId": 106, "toPortIdx": 0 },
+    { "id": 215, "layerId": 1, "fromObjId": 1,   "fromPortIdx": 0, "toObjId": 107, "toPortIdx": 0 },
+    { "id": 218, "layerId": 1, "fromObjId": 12,  "fromPortIdx": 1, "toObjId": 108, "toPortIdx": 0 },
+    { "id": 220, "layerId": 1, "fromObjId": 108, "fromPortIdx": 0, "toObjId": 24,  "toPortIdx": 0 },
+    { "id": 224, "layerId": 1, "fromObjId": 106, "fromPortIdx": 0, "toObjId": 108, "toPortIdx": 1 },
+    { "id": 226, "layerId": 1, "fromObjId": 107, "fromPortIdx": 0, "toObjId": 12,  "toPortIdx": 0 },
+    { "id": 229, "layerId": 1, "fromObjId": 84,  "fromPortIdx": 0, "toObjId": 110, "toPortIdx": 0 },
+    { "id": 230, "layerId": 1, "fromObjId": 110, "fromPortIdx": 0, "toObjId": 109, "toPortIdx": 0 }
+  ],
+  "nextBeltId": 231,
+  "layers": [
+    { "id": 1, "name": "Floor 1", "visible": true }
+  ],
+  "selectedLayerId": 1,
+  "nextLayerId": 2,
+  "nextFloorNum": 2,
+  "viewport": {
+    "scale": 0.5674268557186,
+    "x": -2034.043323541105,
+    "y": -2150.9386614278446
+  }
+}
