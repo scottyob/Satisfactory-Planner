@@ -1125,7 +1125,7 @@ export default function App() {
 
   // ── Flow simulation ───────────────────────────────────────────────────────
 
-  const { flowByBelt, itemByBelt, portActualIn } = useMemo(
+  const { flowByBelt, itemByBelt, portActualIn, machineStatus } = useMemo(
     () => simulateBeltFlow(belts, objects),
     [belts, objects]
   )
@@ -1160,6 +1160,9 @@ export default function App() {
           if (actualItem && actualItem !== inp.item) {
             reasons.push(`Wrong item on input ${portIdx + 1}: got ${actualItem}, expected ${inp.item}`)
           } else {
+            // Skip deficit errors for backed-up machines — their reduced input is
+            // intentional backpressure, not a supply problem.
+            if (machineStatus.get(obj.id) === 'backed_up') continue
             const actualRate   = portActualIn.get(`${obj.id}:${portIdx}`) ?? 0
             const requiredRate = inp.perMin * (obj.clockSpeed ?? 1)
             const deficit      = requiredRate - actualRate
@@ -1170,7 +1173,7 @@ export default function App() {
       if (reasons.length > 0) errors.set(obj.id, reasons)
     }
     return errors
-  }, [objects, belts, portActualIn, itemByBelt])
+  }, [objects, belts, portActualIn, itemByBelt, machineStatus])
 
   // ── Belt flow status ──────────────────────────────────────────────────────
   // 'deficit'  — destination input is undersupplied
@@ -1291,10 +1294,13 @@ export default function App() {
         const excess = theoreticalOut - actualOut
         if (excess > 0.01) reasons.push(`${out.item}: ${fmt(excess)} excess output`)
       }
+      if (machineStatus.get(obj.id) === 'backed_up') {
+        reasons.push('Machine backed up — output not being consumed')
+      }
       if (reasons.length > 0) clogs.set(obj.id, reasons)
     }
     return clogs
-  }, [objects, belts, portActualIn, flowByBelt])
+  }, [objects, belts, portActualIn, flowByBelt, machineStatus])
 
   // ── Render ────────────────────────────────────────────────────────────────
 

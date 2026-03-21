@@ -112,6 +112,7 @@ function simulateDebug(belts, objects, { verbose = true, MAX_ITER = 20 } = {}) {
   // Init machine clock speeds
   const machineClockSpeed = new Map()
   const machineStatus     = new Map()
+  const lastOutCapFactor  = new Map()
   for (const obj of objects) {
     if (isMachine(obj)) machineClockSpeed.set(obj.id, 1.0)
   }
@@ -143,13 +144,18 @@ function simulateDebug(belts, objects, { verbose = true, MAX_ITER = 20 } = {}) {
         for (const b of inBelts) edgeFlow.set(b.id, Math.min(beltCap(b), totalOutDemand))
 
       } else if (obj.type === 'merger' || obj.type === 'connection_point') {
-        // Signal the full outgoing demand to every input belt (capped by that belt's capacity).
-        // Each input should try to supply as much as needed — the forward pass caps the actual
-        // total via min(beltCap, totalIn, outDemand). Dividing by N under-signals demand
-        // through cascaded merger chains.
         const totalOutDemand = outBelts.reduce((s, b) => s + (edgeFlow.get(b.id) ?? 0), 0)
-        for (const b of inBelts) {
-          edgeFlow.set(b.id, Math.min(beltCap(b), totalOutDemand))
+        const totalInFlow    = inBelts.reduce((s, b) => s + (edgeFlow.get(b.id) ?? 0), 0)
+
+        if (isFinite(totalInFlow) && totalInFlow > 0) {
+          const scale = totalOutDemand / totalInFlow
+          for (const b of inBelts) {
+            edgeFlow.set(b.id, Math.min(beltCap(b), (edgeFlow.get(b.id) ?? 0) * scale))
+          }
+        } else {
+          for (const b of inBelts) {
+            edgeFlow.set(b.id, Math.min(beltCap(b), totalOutDemand))
+          }
         }
 
       } else if (isMachine(obj)) {
@@ -166,6 +172,7 @@ function simulateDebug(belts, objects, { verbose = true, MAX_ITER = 20 } = {}) {
             outCapFactor = Math.min(outCapFactor, factor)
           }
         }
+        lastOutCapFactor.set(id, outCapFactor)
         const localSpeed = outCapFactor  // no simSpeed — backward pass signals maximum demand
         log(`    [bwd] obj#${id} ${obj.type}: outCapFactor=${fmt(outCapFactor)} → localSpeed=${fmt(localSpeed)}`)
 
@@ -305,10 +312,11 @@ function simulateDebug(belts, objects, { verbose = true, MAX_ITER = 20 } = {}) {
       }
 
       const newSpeed = Math.max(0, Math.min(1, Math.min(inputFactor, outputFactor)))
-      const status   = inputFactor < outputFactor - 1e-6 ? 'STARVED'
-                     : outputFactor < inputFactor - 1e-6 ? 'BACKED_UP'
-                     : 'OK'
-      log(`  [resolve] obj#${id} ${obj.type}(${obj.recipeId}): inputFactor=${fmt(inputFactor)} outputFactor=${fmt(outputFactor)} → speed=${fmt(newSpeed * 100)}%  ${status}`)
+      const outCap   = lastOutCapFactor.get(id) ?? 1
+      const status   = outCap < 1 - 1e-6          ? 'BACKED_UP'
+                     : inputFactor < 1 - 1e-6      ? 'STARVED'
+                     :                               'OK'
+      log(`  [resolve] obj#${id} ${obj.type}(${obj.recipeId}): inputFactor=${fmt(inputFactor)} outputFactor=${fmt(outputFactor)} outCap=${fmt(outCap)} → speed=${fmt(newSpeed * 100)}%  ${status}`)
       machineClockSpeed.set(id, newSpeed)
       machineStatus.set(id, status.toLowerCase())
     }

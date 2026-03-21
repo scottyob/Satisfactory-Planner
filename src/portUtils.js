@@ -178,8 +178,9 @@ export function simulateBeltFlow(belts, objects) {
   for (const belt of belts) edgeFlow.set(belt.id, beltCap(belt))
 
   // Initialize machine simulated clock speeds at 1.0 (full speed)
-  const machineClockSpeed = new Map()
-  const machineStatus     = new Map()
+  const machineClockSpeed  = new Map()
+  const machineStatus      = new Map()
+  const lastOutCapFactor   = new Map()
   for (const obj of objects) {
     if (BUILDINGS_BY_KEY[obj.type] && obj.recipeId) machineClockSpeed.set(obj.id, 1.0)
   }
@@ -208,13 +209,25 @@ export function simulateBeltFlow(belts, objects) {
         for (const b of inBelts) edgeFlow.set(b.id, Math.min(beltCap(b), totalOutDemand))
 
       } else if (obj.type === 'merger' || obj.type === 'connection_point') {
-        // Signal the full outgoing demand to every input belt (capped by that belt's capacity).
-        // Each input should try to supply as much as needed — the forward pass caps the actual
-        // total via min(beltCap, totalIn, outDemand). Dividing by N would under-signal demand
-        // through cascaded merger chains, causing incorrect flow starvation.
         const totalOutDemand = outBelts.reduce((s, b) => s + (edgeFlow.get(b.id) ?? 0), 0)
-        for (const b of inBelts) {
-          edgeFlow.set(b.id, Math.min(beltCap(b), totalOutDemand))
+        const totalInFlow    = inBelts.reduce((s, b) => s + (edgeFlow.get(b.id) ?? 0), 0)
+
+        if (isFinite(totalInFlow) && totalInFlow > 0) {
+          // Scale each input's demand proportionally to match total output demand.
+          // When supply > demand: scale < 1, throttles machines back (backpressure).
+          // When supply = demand: scale = 1, no change.
+          // When supply < demand: scale > 1, boosts demand signal upstream.
+          // This avoids the divide-by-N decay in cascaded chains because the scale is
+          // derived from actual forward-pass flows, not a fixed count of inputs.
+          const scale = totalOutDemand / totalInFlow
+          for (const b of inBelts) {
+            edgeFlow.set(b.id, Math.min(beltCap(b), (edgeFlow.get(b.id) ?? 0) * scale))
+          }
+        } else {
+          // First iteration (Infinity flows) or zero supply: signal full demand to each input.
+          for (const b of inBelts) {
+            edgeFlow.set(b.id, Math.min(beltCap(b), totalOutDemand))
+          }
         }
 
       } else if (BUILDINGS_BY_KEY[obj.type] && obj.recipeId) {
@@ -229,6 +242,7 @@ export function simulateBeltFlow(belts, objects) {
           const maxOut = recipe.outputs[i].perMin * userSpeed
           if (maxOut > 0) outCapFactor = Math.min(outCapFactor, (edgeFlow.get(belt.id) ?? 0) / maxOut)
         }
+        lastOutCapFactor.set(id, outCapFactor)
         const localSpeed = outCapFactor
 
         // Signal demand to each connected input port
@@ -349,9 +363,11 @@ export function simulateBeltFlow(belts, objects) {
 
       machineClockSpeed.set(id, Math.max(0, Math.min(1, Math.min(inputFactor, outputFactor))))
 
-      if (inputFactor < outputFactor - 1e-6)      machineStatus.set(id, 'starved')
-      else if (outputFactor < inputFactor - 1e-6) machineStatus.set(id, 'backed_up')
-      else                                         machineStatus.set(id, 'ok')
+      // outCapFactor < 1 means downstream demanded less than this machine could produce → backed up
+      const outCap = lastOutCapFactor.get(id) ?? 1
+      if (outCap < 1 - 1e-6)              machineStatus.set(id, 'backed_up')
+      else if (inputFactor < 1 - 1e-6)    machineStatus.set(id, 'starved')
+      else                                 machineStatus.set(id, 'ok')
     }
 
     // Convergence check
