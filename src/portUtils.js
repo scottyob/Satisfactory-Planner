@@ -204,8 +204,12 @@ export function simulateBeltFlow(belts, objects) {
         for (const b of inBelts) edgeFlow.set(b.id, beltCap(b))
 
       } else if (obj.type === 'splitter') {
-        // Input demand = sum of all output demands
-        const totalOutDemand = outBelts.reduce((s, b) => s + (edgeFlow.get(b.id) ?? 0), 0)
+        // Input demand = sum of non-disabled output demands
+        let totalOutDemand = 0
+        for (const b of outBelts) {
+          const filter = obj.outputFilters?.[b.fromPortIdx] ?? 'any'
+          if (filter !== 'none') totalOutDemand += edgeFlow.get(b.id) ?? 0
+        }
         for (const b of inBelts) edgeFlow.set(b.id, Math.min(beltCap(b), totalOutDemand))
 
       } else if (obj.type === 'merger' || obj.type === 'connection_point') {
@@ -272,14 +276,47 @@ export function simulateBeltFlow(belts, objects) {
         // Sink — no outputs
 
       } else if (obj.type === 'splitter') {
-        const available = inBelts.reduce((s, b) => s + (edgeFlow.get(b.id) ?? 0), 0)
-        const items     = [...new Set(inBelts.map(b => edgeItem.get(b.id)).filter(Boolean))]
-        if (outBelts.length > 0) {
+        const available    = inBelts.reduce((s, b) => s + (edgeFlow.get(b.id) ?? 0), 0)
+        const items        = [...new Set(inBelts.map(b => edgeItem.get(b.id)).filter(Boolean))]
+        const incomingItem = items[0] ?? null
+        const filters      = obj.outputFilters
+
+        if (!filters || filters.every(f => f === 'any')) {
+          // Dumb splitter — existing fair-share behavior
           const demands   = outBelts.map(b => Math.min(beltCap(b), edgeFlow.get(b.id) ?? 0))
           const allocated = distributeSplitter(available, demands)
           for (let i = 0; i < outBelts.length; i++) {
             edgeFlow.set(outBelts[i].id, allocated[i])
-            if (items.length === 1) edgeItem.set(outBelts[i].id, items[0])
+            if (incomingItem) edgeItem.set(outBelts[i].id, incomingItem)
+          }
+        } else {
+          // Smart splitter — tier-based routing by filter rule
+          const hasSpecificMatch = incomingItem && filters.some(f => f === incomingItem)
+          const tier1 = []  // specific-item match + active any_undefined
+          const tier2 = []  // 'any'
+          const tier3 = []  // 'overflow'
+
+          for (let i = 0; i < outBelts.length; i++) {
+            const f = filters[i] ?? 'any'
+            if (f === 'none') { edgeFlow.set(outBelts[i].id, 0); continue }
+            const cap = Math.min(beltCap(outBelts[i]), edgeFlow.get(outBelts[i].id) ?? 0)
+            if (f === incomingItem || (f === 'any_undefined' && !hasSpecificMatch)) tier1.push({ i, cap })
+            else if (f === 'any')      tier2.push({ i, cap })
+            else if (f === 'overflow') tier3.push({ i, cap })
+            else { edgeFlow.set(outBelts[i].id, 0) }  // specific filter that doesn't match input
+          }
+
+          let rem = available
+          for (const tier of [tier1, tier2, tier3]) {
+            if (tier.length === 0 || rem <= 0) continue
+            const alloc = distributeSplitter(rem, tier.map(o => o.cap))
+            let used = 0
+            for (let j = 0; j < tier.length; j++) {
+              edgeFlow.set(outBelts[tier[j].i].id, alloc[j])
+              if (incomingItem) edgeItem.set(outBelts[tier[j].i].id, incomingItem)
+              used += alloc[j]
+            }
+            rem -= used
           }
         }
 

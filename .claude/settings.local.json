@@ -25,7 +25,8 @@
       "Bash(find C:/Users/scott/git/belts -name *.json)",
       "Bash(npm test:*)",
       "Bash(npx vitest:*)",
-      "Bash(node:*)"
+      "Bash(node:*)",
+      "Bash(npx vite:*)"
     ]
   }
 }

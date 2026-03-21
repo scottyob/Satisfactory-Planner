@@ -6,6 +6,7 @@ import LayersPanel, { useLayers, FOUNDATIONS_BY_KEY } from './LayersPanel.jsx'
 import BuildingObject from './BuildingObject.jsx'
 import FloorInputModal from './FloorInputModal.jsx'
 import RecipeModal from './RecipeModal.jsx'
+import SplitterModal from './SplitterModal.jsx'
 import { BUILDINGS_BY_KEY } from './buildings.js'
 import { RECIPES_BY_ID } from './recipes.js'
 import BeltObject from './BeltObject.jsx'
@@ -216,6 +217,7 @@ export default function App() {
   const [fileName, setFileName]             = useState(null)
   const [floorInputModal, setFloorInputModal] = useState({ open: false, objId: null })
   const [recipeModal,     setRecipeModal]     = useState({ open: false, objId: null })
+  const [splitterModal,   setSplitterModal]   = useState({ open: false, objId: null })
   const [tooltip, setTooltip]                 = useState(null) // { x, y, content: [{text,color}] } | null
 
   // Keep refs in sync with latest state for use in stable callbacks
@@ -762,6 +764,12 @@ export default function App() {
     setObjects(prev => prev.map(o => o.id === objId ? { ...o, item, ratePerMin } : o))
     setFloorInputModal({ open: false, objId: null })
   }, [floorInputModal])
+
+  const handleSplitterConfirm = useCallback((outputFilters) => {
+    const { objId } = splitterModal
+    setObjects(prev => prev.map(o => o.id === objId ? { ...o, outputFilters } : o))
+    setSplitterModal({ open: false, objId: null })
+  }, [splitterModal])
 
   // Click on stage background: deselect (unless ending a marquee drag)
   const handleStageClick = useCallback((e) => {
@@ -1442,6 +1450,8 @@ export default function App() {
                           ? undefined
                           : obj.type === 'floor_input'
                           ? () => setFloorInputModal({ open: true, objId: obj.id })
+                          : obj.type === 'splitter'
+                          ? () => setSplitterModal({ open: true, objId: obj.id })
                           : BUILDINGS_BY_KEY[obj.type]
                           ? () => setRecipeModal({ open: true, objId: obj.id })
                           : undefined
@@ -1569,6 +1579,13 @@ export default function App() {
           />
         )
       })()}
+
+      <SplitterModal
+        open={splitterModal.open}
+        outputFilters={objects.find(o => o.id === splitterModal.objId)?.outputFilters ?? ['any', 'any', 'any']}
+        onConfirm={handleSplitterConfirm}
+        onCancel={() => setSplitterModal({ open: false, objId: null })}
+      />
 
       {/* Tooltip */}
       {tooltip && (
