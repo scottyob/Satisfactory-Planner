@@ -113,7 +113,7 @@ function SelectMenu({ tool, onToolChange, selectFilter, onSelectFilterChange }) 
   )
 }
 
-function FileMenu({ onNew, onSave, onLoad, onLoadDemo }) {
+function FileMenu({ onNew, onSave, onSaveAs, onLoad, onLoadDemo }) {
   const [open, setOpen] = useState(false)
   const menuRef = useRef(null)
 
@@ -156,7 +156,10 @@ function FileMenu({ onNew, onSave, onLoad, onLoadDemo }) {
             New
           </button>
           <button style={menuItemStyle} onClick={() => { onSave(); setOpen(false); }}>
-            Save
+            Save  <span style={{ color: '#4a9eda', fontSize: 10 }}>Ctrl+S</span>
+          </button>
+          <button style={menuItemStyle} onClick={() => { onSaveAs(); setOpen(false); }}>
+            Save As…
           </button>
           <button style={menuItemStyle} onClick={() => { onLoad(); setOpen(false); }}>
             Load
@@ -330,7 +333,7 @@ function EditableTitle({ fileName, onRename }) {
   )
 }
 
-export default function Toolbar({ tool, onToolChange, selectFilter, onSelectFilterChange, viewOptions, onViewToggle, foundationOpacity, onFoundationOpacityChange, fileName, onRename, onSave, onLoad, onNew, onLoadDemo }) {
+export default function Toolbar({ tool, onToolChange, selectFilter, onSelectFilterChange, viewOptions, onViewToggle, foundationOpacity, onFoundationOpacityChange, fileName, onRename, onSave, onSaveAs, onLoad, onNew, onLoadDemo }) {
   return (
     <div
       style={{
@@ -352,7 +355,7 @@ export default function Toolbar({ tool, onToolChange, selectFilter, onSelectFilt
 
       <div style={{ width: 1, height: 24, background: '#1e3a54', margin: '0 8px' }} />
 
-      <FileMenu onNew={onNew} onSave={onSave} onLoad={onLoad} onLoadDemo={onLoadDemo} />
+      <FileMenu onNew={onNew} onSave={onSave} onSaveAs={onSaveAs} onLoad={onLoad} onLoadDemo={onLoadDemo} />
       <ViewMenu viewOptions={viewOptions} onToggle={onViewToggle} foundationOpacity={foundationOpacity} onFoundationOpacityChange={onFoundationOpacityChange} />
 
       <div style={{ width: 1, height: 24, background: '#1e3a54', margin: '0 8px' }} />

@@ -177,6 +177,8 @@ export default function App() {
   const historyRef            = useRef([])   // undo stack: [{objects, belts}]
   const clipboardRef          = useRef(null) // copy/cut: {objects, belts}
   const saveHistoryRef        = useRef(null) // stable ref to saveHistory fn
+  const fileHandleRef         = useRef(null) // File System Access API handle for overwrite saves
+  const handleSaveRef         = useRef(null) // stable ref to handleSave for keyboard shortcut
   const beltsRef              = useRef([])
   const pendingBeltRef        = useRef(null)
   const selectedIdRef         = useRef(1)
@@ -270,6 +272,13 @@ export default function App() {
       if (e.target.tagName === 'INPUT') return
 
       const ctrl = e.ctrlKey || e.metaKey
+
+      // Save
+      if (ctrl && (e.key === 's' || e.key === 'S')) {
+        e.preventDefault()
+        handleSaveRef.current?.()
+        return
+      }
 
       // Undo
       if (ctrl && (e.key === 'z' || e.key === 'Z')) {
@@ -1219,7 +1228,7 @@ export default function App() {
 
   // ── Save / Load ───────────────────────────────────────────────────────────
 
-  const handleSave = useCallback(() => {
+  const buildStateBlob = useCallback(() => {
     const state = {
       version: 1,
       objects,
@@ -1232,14 +1241,43 @@ export default function App() {
       nextFloorNum: _nextFloorNum(),
       viewport,
     }
-    const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' })
-    const url  = URL.createObjectURL(blob)
-    const a    = document.createElement('a')
-    a.href     = url
-    a.download = fileName ?? 'factory.json'
-    a.click()
-    URL.revokeObjectURL(url)
-  }, [objects, belts, layers, selectedId, viewport, fileName, _nextLayerId, _nextFloorNum])
+    return new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' })
+  }, [objects, belts, layers, selectedId, viewport, _nextLayerId, _nextFloorNum])
+
+  const handleSaveAs = useCallback(async () => {
+    const blob = buildStateBlob()
+    try {
+      const handle = await window.showSaveFilePicker({
+        suggestedName: fileName ?? 'factory.json',
+        types: [{ description: 'Factory JSON', accept: { 'application/json': ['.json'] } }],
+      })
+      fileHandleRef.current = handle
+      setFileName(handle.name)
+      const writable = await handle.createWritable()
+      await writable.write(blob)
+      await writable.close()
+    } catch (err) {
+      if (err.name !== 'AbortError') console.error(err)
+    }
+  }, [buildStateBlob, fileName])
+
+  const handleSave = useCallback(async () => {
+    if (fileHandleRef.current) {
+      // Overwrite the same file directly — no dialog
+      try {
+        const blob = buildStateBlob()
+        const writable = await fileHandleRef.current.createWritable()
+        await writable.write(blob)
+        await writable.close()
+      } catch (err) {
+        console.error(err)
+      }
+    } else {
+      await handleSaveAs()
+    }
+  }, [buildStateBlob, handleSaveAs])
+
+  handleSaveRef.current = handleSave
 
   const handleNew = useCallback(() => {
     _nextObjId  = 1
@@ -1254,6 +1292,7 @@ export default function App() {
     )
     setViewport({ scale: 1, x: dimensions.width / 2 - Math.floor(GRID_CELLS / 2) * CELL_SIZE, y: dimensions.height / 2 - Math.floor(GRID_CELLS / 2) * CELL_SIZE })
     setFileName(null)
+    fileHandleRef.current = null
   }, [dimensions.width, dimensions.height])
 
   const handleLoadDemo = useCallback(() => {
@@ -1512,7 +1551,7 @@ export default function App() {
         foundationOpacity={foundationOpacity}
         onFoundationOpacityChange={setFoundationOpacity}
         fileName={fileName} onRename={setFileName}
-        onSave={handleSave} onLoad={handleLoad} onNew={handleNew} onLoadDemo={handleLoadDemo}
+        onSave={handleSave} onSaveAs={handleSaveAs} onLoad={handleLoad} onNew={handleNew} onLoadDemo={handleLoadDemo}
       />
 
       <div style={{ position: 'absolute', top: TOOLBAR_HEIGHT, left: 0 }}>
