@@ -75,6 +75,10 @@ export function computeBeltGroup(startBeltId, belts, objects, flowByBelt = null,
         // Always use configured production rate — belt may carry less due to backpressure,
         // but the source is producing this much regardless
         sources.push({ item: fromObj.item, rate: fromObj.ratePerMin ?? 60 })
+      } else if (fromObj.type === 'conveyor_lift_out') {
+        const rate = flowByBelt?.get(beltId) ?? 0
+        const item = itemByBelt?.get(beltId) ?? null
+        if (rate > 0) sources.push({ item, rate })
       }
     }
 
@@ -87,6 +91,10 @@ export function computeBeltGroup(startBeltId, belts, objects, flowByBelt = null,
           sinks.push({ item: inp.item, rate })
         }
       } else if (toObj.type === 'floor_output') {
+        const rate = flowByBelt?.get(beltId) ?? 0
+        const item = itemByBelt?.get(beltId) ?? null
+        sinks.push({ item, rate })
+      } else if (toObj.type === 'conveyor_lift_in') {
         const rate = flowByBelt?.get(beltId) ?? 0
         const item = itemByBelt?.get(beltId) ?? null
         sinks.push({ item, rate })
@@ -156,10 +164,26 @@ export function simulateBeltFlow(belts, objects) {
     if (outBeltByPort[belt.fromObjId]) outBeltByPort[belt.fromObjId][belt.fromPortIdx] = belt
   }
 
+  // Build conveyor lift linkage: liftOut.id → liftIn obj, and reverse
+  const liftOutToIn = new Map()
+  const liftInToOut = new Map()
+  for (const obj of objects) {
+    if (obj.type === 'conveyor_lift_out' && obj.linkedLiftId) {
+      const linked = objsById[obj.linkedLiftId]
+      if (linked?.type === 'conveyor_lift_in') {
+        liftOutToIn.set(obj.id, linked)
+        liftInToOut.set(linked.id, obj)
+      }
+    }
+  }
+
   // Topological sort (Kahn's algorithm)
+  // Virtual dependency: liftIn → liftOut ensures liftIn is processed first in the
+  // forward pass (so liftOut reads the current iteration's inflow, not last iteration's).
   const inDegree = {}
   for (const obj of objects) inDegree[obj.id] = 0
   for (const belt of belts) { if (objsById[belt.toObjId]) inDegree[belt.toObjId]++ }
+  for (const [liftOutId] of liftOutToIn) inDegree[liftOutId]++  // virtual liftIn→liftOut edge
   const topoQ   = objects.filter(o => inDegree[o.id] === 0).map(o => o.id)
   const order   = []
   const visited = new Set()
@@ -170,12 +194,26 @@ export function simulateBeltFlow(belts, objects) {
     for (const belt of outBeltsForObj[id] ?? []) {
       if (objsById[belt.toObjId] && --inDegree[belt.toObjId] === 0) topoQ.push(belt.toObjId)
     }
+    // Release the linked liftOut once liftIn has been ordered
+    const liftOut = liftInToOut.get(id)
+    if (liftOut && --inDegree[liftOut.id] === 0) topoQ.push(liftOut.id)
   }
+  // Track actual inflow/item at each lift-in across iterations
+  const liftInFlow = new Map()  // liftIn.id → rate
+  const liftInItem = new Map()  // liftIn.id → item string
 
   // Initialize all edges at max throughput
   const edgeFlow = new Map()
   const edgeItem = new Map()
   for (const belt of belts) edgeFlow.set(belt.id, beltCap(belt))
+
+  // NaN guard helpers: a belt's edgeFlow can temporarily become NaN when a
+  // backward-pass demand signal of Infinity is multiplied by a forward-pass
+  // supply of 0 (0 × ∞ = NaN in IEEE 754). Guard by treating NaN as 0 when
+  // reading supply (forward pass) and Infinity when reading demand (backward
+  // pass), so NaN never propagates to adjacent nodes.
+  const flowAsSupply = (beltId) => { const f = edgeFlow.get(beltId) ?? 0;       return isNaN(f) ? 0       : f }
+  const flowAsDemand = (beltId) => { const f = edgeFlow.get(beltId) ?? Infinity; return isNaN(f) ? Infinity : f }
 
   // Initialize machine simulated clock speeds at 1.0 (full speed)
   const machineClockSpeed  = new Map()
@@ -203,18 +241,29 @@ export function simulateBeltFlow(belts, objects) {
         // Sink — demand up to belt capacity on each input
         for (const b of inBelts) edgeFlow.set(b.id, beltCap(b))
 
+      } else if (obj.type === 'conveyor_lift_in') {
+        // Propagate downstream demand from the linked lift-out back through the lift
+        const liftOut = liftInToOut.get(obj.id)
+        const outDemand = liftOut
+          ? (outBeltsForObj[liftOut.id] ?? []).reduce((s, b) => s + flowAsDemand(b.id), 0)
+          : Infinity
+        for (const b of inBelts) edgeFlow.set(b.id, Math.min(beltCap(b), outDemand))
+
+      } else if (obj.type === 'conveyor_lift_out') {
+        // Source — nothing to propagate backward
+
       } else if (obj.type === 'splitter') {
         // Input demand = sum of non-disabled output demands
         let totalOutDemand = 0
         for (const b of outBelts) {
           const filter = obj.outputFilters?.[b.fromPortIdx] ?? 'any'
-          if (filter !== 'none') totalOutDemand += edgeFlow.get(b.id) ?? 0
+          if (filter !== 'none') totalOutDemand += flowAsDemand(b.id)
         }
         for (const b of inBelts) edgeFlow.set(b.id, Math.min(beltCap(b), totalOutDemand))
 
       } else if (obj.type === 'merger' || obj.type === 'connection_point') {
-        const totalOutDemand = outBelts.reduce((s, b) => s + (edgeFlow.get(b.id) ?? 0), 0)
-        const totalInFlow    = inBelts.reduce((s, b) => s + (edgeFlow.get(b.id) ?? 0), 0)
+        const totalOutDemand = outBelts.reduce((s, b) => s + flowAsDemand(b.id), 0)
+        const totalInFlow    = inBelts.reduce((s, b) => s + flowAsSupply(b.id), 0)
 
         if (isFinite(totalInFlow) && totalInFlow > 0) {
           // Scale each input's demand proportionally to match total output demand.
@@ -225,7 +274,10 @@ export function simulateBeltFlow(belts, objects) {
           // derived from actual forward-pass flows, not a fixed count of inputs.
           const scale = totalOutDemand / totalInFlow
           for (const b of inBelts) {
-            edgeFlow.set(b.id, Math.min(beltCap(b), (edgeFlow.get(b.id) ?? 0) * scale))
+            const prev = flowAsSupply(b.id)
+            // Guard against 0 × Infinity = NaN: if scale is non-finite signal full demand.
+            const demanded = isFinite(scale) ? prev * scale : beltCap(b)
+            edgeFlow.set(b.id, Math.min(beltCap(b), demanded))
           }
         } else {
           // First iteration (Infinity flows) or zero supply: signal full demand to each input.
@@ -244,7 +296,7 @@ export function simulateBeltFlow(belts, objects) {
         for (let i = 0; i < recipe.outputs.length; i++) {
           const belt = outBeltByPort[id]?.[i]; if (!belt) continue  // unconnected = no constraint
           const maxOut = recipe.outputs[i].perMin * userSpeed
-          if (maxOut > 0) outCapFactor = Math.min(outCapFactor, (edgeFlow.get(belt.id) ?? 0) / maxOut)
+          if (maxOut > 0) outCapFactor = Math.min(outCapFactor, flowAsDemand(belt.id) / maxOut)
         }
         lastOutCapFactor.set(id, outCapFactor)
         const localSpeed = outCapFactor
@@ -268,22 +320,39 @@ export function simulateBeltFlow(belts, objects) {
         const supply = obj.ratePerMin ?? 60
         for (const b of outBelts) {
           // Cap by belt tier, configured supply, and downstream demand signal
-          edgeFlow.set(b.id, Math.min(beltCap(b), supply, edgeFlow.get(b.id) ?? Infinity))
+          edgeFlow.set(b.id, Math.min(beltCap(b), supply, flowAsDemand(b.id)))
           edgeItem.set(b.id, obj.item ?? null)
         }
 
       } else if (obj.type === 'floor_output') {
         // Sink — no outputs
 
+      } else if (obj.type === 'conveyor_lift_in') {
+        // Sink — record actual inflow so the linked lift-out can source it
+        const inFlow = inBelts.reduce((s, b) => s + flowAsSupply(b.id), 0)
+        const inItem = inBelts.map(b => edgeItem.get(b.id)).find(Boolean) ?? null
+        liftInFlow.set(obj.id, inFlow)
+        liftInItem.set(obj.id, inItem)
+
+      } else if (obj.type === 'conveyor_lift_out') {
+        // Source — supply equals what the linked lift-in actually received last iteration
+        const liftIn = liftOutToIn.get(obj.id)
+        const supply = liftIn ? (liftInFlow.get(liftIn.id) ?? 0) : 0
+        const item   = liftIn ? (liftInItem.get(liftIn.id) ?? null) : null
+        for (const b of outBelts) {
+          edgeFlow.set(b.id, Math.min(beltCap(b), supply, flowAsDemand(b.id)))
+          if (item) edgeItem.set(b.id, item)
+        }
+
       } else if (obj.type === 'splitter') {
-        const available    = inBelts.reduce((s, b) => s + (edgeFlow.get(b.id) ?? 0), 0)
+        const available    = inBelts.reduce((s, b) => s + flowAsSupply(b.id), 0)
         const items        = [...new Set(inBelts.map(b => edgeItem.get(b.id)).filter(Boolean))]
         const incomingItem = items[0] ?? null
         const filters      = obj.outputFilters
 
         if (!filters || filters.every(f => f === 'any')) {
           // Dumb splitter — existing fair-share behavior
-          const demands   = outBelts.map(b => Math.min(beltCap(b), edgeFlow.get(b.id) ?? 0))
+          const demands   = outBelts.map(b => Math.min(beltCap(b), flowAsDemand(b.id)))
           const allocated = distributeSplitter(available, demands)
           for (let i = 0; i < outBelts.length; i++) {
             edgeFlow.set(outBelts[i].id, allocated[i])
@@ -299,7 +368,7 @@ export function simulateBeltFlow(belts, objects) {
           for (let i = 0; i < outBelts.length; i++) {
             const f = filters[i] ?? 'any'
             if (f === 'none') { edgeFlow.set(outBelts[i].id, 0); continue }
-            const cap = Math.min(beltCap(outBelts[i]), edgeFlow.get(outBelts[i].id) ?? 0)
+            const cap = Math.min(beltCap(outBelts[i]), flowAsDemand(outBelts[i].id))
             if (f === incomingItem || (f === 'any_undefined' && !hasSpecificMatch)) tier1.push({ i, cap })
             else if (f === 'any')      tier2.push({ i, cap })
             else if (f === 'overflow') tier3.push({ i, cap })
@@ -321,8 +390,8 @@ export function simulateBeltFlow(belts, objects) {
         }
 
       } else if (obj.type === 'merger' || obj.type === 'connection_point') {
-        const totalIn   = inBelts.reduce((s, b) => s + (edgeFlow.get(b.id) ?? 0), 0)
-        const outDemand = outBelts.reduce((s, b) => s + (edgeFlow.get(b.id) ?? 0), 0)
+        const totalIn   = inBelts.reduce((s, b) => s + flowAsSupply(b.id), 0)
+        const outDemand = outBelts.reduce((s, b) => s + flowAsDemand(b.id), 0)
         const items     = [...new Set(inBelts.map(b => edgeItem.get(b.id)).filter(Boolean))]
         for (const b of outBelts) {
           edgeFlow.set(b.id, Math.min(beltCap(b), totalIn, outDemand))
@@ -348,7 +417,7 @@ export function simulateBeltFlow(belts, objects) {
               if (actualItem && actualItem !== inp.item) {
                 inSupplyFactor = 0  // wrong item on belt
               } else {
-                inSupplyFactor = Math.min(inSupplyFactor, (edgeFlow.get(belt.id) ?? 0) / maxIn)
+                inSupplyFactor = Math.min(inSupplyFactor, flowAsSupply(belt.id) / maxIn)
               }
             }
           }
@@ -385,7 +454,7 @@ export function simulateBeltFlow(belts, objects) {
             if (actualItem && actualItem !== inp.item) {
               inputFactor = 0
             } else {
-              inputFactor = Math.min(inputFactor, (edgeFlow.get(belt.id) ?? 0) / maxIn)
+              inputFactor = Math.min(inputFactor, flowAsSupply(belt.id) / maxIn)
             }
           }
         }
@@ -395,7 +464,7 @@ export function simulateBeltFlow(belts, objects) {
       for (let i = 0; i < recipe.outputs.length; i++) {
         const belt   = outBeltByPort[id]?.[i]; if (!belt) continue
         const maxOut = recipe.outputs[i].perMin * userSpeed
-        if (maxOut > 0) outputFactor = Math.min(outputFactor, (edgeFlow.get(belt.id) ?? 0) / maxOut)
+        if (maxOut > 0) outputFactor = Math.min(outputFactor, flowAsSupply(belt.id) / maxOut)
       }
 
       machineClockSpeed.set(id, Math.max(0, Math.min(1, Math.min(inputFactor, outputFactor))))
@@ -407,9 +476,12 @@ export function simulateBeltFlow(belts, objects) {
       else                                 machineStatus.set(id, 'ok')
     }
 
-    // Convergence check
+    // Convergence check (skip NaN entries — they resolve in subsequent iterations)
     let maxDiff = 0
-    for (const [id, f] of edgeFlow) maxDiff = Math.max(maxDiff, Math.abs(f - (prevFlow.get(id) ?? 0)))
+    for (const [id, f] of edgeFlow) {
+      const diff = Math.abs(f - (prevFlow.get(id) ?? 0))
+      if (!isNaN(diff)) maxDiff = Math.max(maxDiff, diff)
+    }
     if (maxDiff < 1e-6) break
   }
 
@@ -425,7 +497,7 @@ export function simulateBeltFlow(belts, objects) {
         portActualIn.set(`${obj.id}:${i}`, 0)
       } else {
         const actualItem = edgeItem.get(belt.id)
-        portActualIn.set(`${obj.id}:${i}`, (actualItem && actualItem !== inp.item) ? 0 : (edgeFlow.get(belt.id) ?? 0))
+        portActualIn.set(`${obj.id}:${i}`, (actualItem && actualItem !== inp.item) ? 0 : flowAsSupply(belt.id))
       }
     }
   }
@@ -460,6 +532,81 @@ export function getPortWorldPos(obj, portDef) {
 }
 
 const SNAP_DISTANCE = CELL_SIZE * 3
+
+/**
+ * Auto-connect: for each object in movedObjIds, check if any of its belt ports
+ * exactly coincide with an unoccupied belt port of another object on the same layer.
+ * Returns new belt descriptors (without id — caller must assign).
+ *
+ * @param {Set<number>} movedObjIds  IDs of objects whose positions just changed
+ * @param {Object[]}    allObjects   Full objects array with updated positions
+ * @param {Object[]}    existingBelts Current belts (used to avoid double-connecting)
+ * @returns {{ fromObjId, fromPortIdx, toObjId, toPortIdx, layerId }[]}
+ */
+export function computeAutoConnections(movedObjIds, allObjects, existingBelts) {
+  const THRESHOLD = CELL_SIZE * 0.6  // half-cell tolerance: odd-height buildings misalign by up to CELL_SIZE/2
+  const occupiedIn  = new Set(existingBelts.map(b => `${b.toObjId}:${b.toPortIdx}`))
+  const occupiedOut = new Set(existingBelts.map(b => `${b.fromObjId}:${b.fromPortIdx}`))
+  const newBelts = []
+
+  for (const obj of allObjects) {
+    if (!movedObjIds.has(obj.id)) continue
+    const def = ALL_BUILDINGS_BY_KEY[obj.type]
+    if (!def) continue
+
+    // Check each output port of the moved object against every input port of other objects
+    def.outputs.forEach((outDef, outIdx) => {
+      if (outDef.type !== 'belt') return
+      const outKey = `${obj.id}:${outIdx}`
+      if (occupiedOut.has(outKey)) return
+      const outPos = getPortWorldPos(obj, outDef)
+
+      for (const other of allObjects) {
+        if (other.id === obj.id || other.layerId !== obj.layerId) continue
+        const otherDef = ALL_BUILDINGS_BY_KEY[other.type]
+        if (!otherDef) continue
+        otherDef.inputs.forEach((inDef, inIdx) => {
+          if (inDef.type !== 'belt') return
+          const inKey = `${other.id}:${inIdx}`
+          if (occupiedIn.has(inKey)) return
+          const inPos = getPortWorldPos(other, inDef)
+          if (Math.hypot(outPos.x - inPos.x, outPos.y - inPos.y) < THRESHOLD) {
+            newBelts.push({ fromObjId: obj.id, fromPortIdx: outIdx, toObjId: other.id, toPortIdx: inIdx, layerId: obj.layerId })
+            occupiedOut.add(outKey)
+            occupiedIn.add(inKey)
+          }
+        })
+      }
+    })
+
+    // Check each input port of the moved object against every output port of other objects
+    def.inputs.forEach((inDef, inIdx) => {
+      if (inDef.type !== 'belt') return
+      const inKey = `${obj.id}:${inIdx}`
+      if (occupiedIn.has(inKey)) return
+      const inPos = getPortWorldPos(obj, inDef)
+
+      for (const other of allObjects) {
+        if (other.id === obj.id || other.layerId !== obj.layerId) continue
+        const otherDef = ALL_BUILDINGS_BY_KEY[other.type]
+        if (!otherDef) continue
+        otherDef.outputs.forEach((outDef, outIdx) => {
+          if (outDef.type !== 'belt') return
+          const outKey = `${other.id}:${outIdx}`
+          if (occupiedOut.has(outKey)) return
+          const outPos = getPortWorldPos(other, outDef)
+          if (Math.hypot(inPos.x - outPos.x, inPos.y - outPos.y) < THRESHOLD) {
+            newBelts.push({ fromObjId: other.id, fromPortIdx: outIdx, toObjId: obj.id, toPortIdx: inIdx, layerId: obj.layerId })
+            occupiedOut.add(outKey)
+            occupiedIn.add(inKey)
+          }
+        })
+      }
+    })
+  }
+
+  return newBelts
+}
 
 /**
  * Find the nearest unoccupied input port (matching portType) within SNAP_DISTANCE.

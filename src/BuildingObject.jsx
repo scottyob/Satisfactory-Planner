@@ -188,7 +188,7 @@ function FloorInputContent({ obj, pw, ph, hw, hh, color }) {
     return (
       <Text
         x={-hw} y={-hh} width={pw} height={ph}
-        text={obj.item === undefined ? 'FLR IN' : ''}
+        text={obj.item === undefined ? 'FACT IN' : ''}
         align="center" verticalAlign="middle"
         fontSize={12} fontFamily="monospace" fill={color} listening={false}
       />
@@ -261,8 +261,79 @@ function FloorInputContent({ obj, pw, ph, hw, hh, color }) {
   )
 }
 
+// Rendered inside conveyor_lift_in / conveyor_lift_out — always shows type label + item icon when flowing
+function ConveyorLiftContent({ label, incomingItems, pw, ph, hw, hh, color }) {
+  const item = incomingItems?.[0]?.item ?? null
+  const rate = incomingItems?.[0]?.rate ?? 0
+  const img  = useItemImage(item)
+
+  const labelH  = Math.round(ph * 0.22)
+  const imgPad  = 4
+  const imgSize = Math.round(Math.min(pw, ph - labelH) * 0.62)
+  const imgY    = -hh + labelH + imgPad + (ph - labelH - imgPad * 2 - imgSize) / 2
+
+  const initials = item
+    ? (item.split(' ').filter(w => /[A-Z]/i.test(w[0])).map(w => w[0].toUpperCase()).join('').slice(0, 2) || item.slice(0, 2).toUpperCase())
+    : ''
+  const fmtRate = rate % 1 === 0 ? `${rate}/min` : `${rate.toFixed(1)}/min`
+
+  return (
+    <>
+      {/* Always-visible type label */}
+      <Text
+        x={-hw} y={-hh + 3} width={pw} height={labelH - 3}
+        text={label}
+        align="center" verticalAlign="middle"
+        fontSize={11} fontFamily="monospace" fill={color}
+        listening={false}
+      />
+
+      {item && (
+        <>
+          <Line
+            points={[-hw + 4, -hh + labelH, hw - 4, -hh + labelH]}
+            stroke={`${color}55`} strokeWidth={1} listening={false}
+          />
+          <Text
+            x={-hw} y={-hh + labelH + 2} width={pw} height={14}
+            text={fmtRate}
+            align="center" verticalAlign="middle"
+            fontSize={9} fontFamily="monospace" fill="#7aabcc"
+            listening={false}
+          />
+          {img ? (
+            <KonvaImage
+              image={img}
+              x={-imgSize / 2} y={imgY + 14}
+              width={imgSize} height={imgSize}
+              listening={false}
+            />
+          ) : (
+            <>
+              <Circle
+                x={0} y={imgY + 14 + imgSize / 2}
+                radius={imgSize / 2}
+                fill="#2ab87033" stroke="#2ab870" strokeWidth={1}
+                listening={false}
+              />
+              <Text
+                x={-imgSize / 2} y={imgY + 14}
+                width={imgSize} height={imgSize}
+                text={initials}
+                align="center" verticalAlign="middle"
+                fontSize={Math.round(imgSize * 0.28)} fontFamily="monospace"
+                fill="#2ab870" listening={false}
+              />
+            </>
+          )}
+        </>
+      )}
+    </>
+  )
+}
+
 // Rendered inside the floor_output building body
-function FloorOutputContent({ incomingItems, pw, ph, hw, hh, color }) {
+function FloorOutputContent({ incomingItems, pw, ph, hw, hh, color, fallbackLabel = 'FACT OUT' }) {
   const item = incomingItems?.[0]?.item ?? null
   const rate = incomingItems?.[0]?.rate ?? 0
   const img  = useItemImage(item)
@@ -271,7 +342,7 @@ function FloorOutputContent({ incomingItems, pw, ph, hw, hh, color }) {
     return (
       <Text
         x={-hw} y={-hh} width={pw} height={ph}
-        text="FLR OUT"
+        text={fallbackLabel}
         align="center" verticalAlign="middle"
         fontSize={12} fontFamily="monospace" fill={color} listening={false}
       />
@@ -666,6 +737,10 @@ export default function BuildingObject({
           <FloorInputContent obj={obj} pw={pw} ph={ph} hw={hw} hh={hh} color={color} />
         ) : obj.type === 'floor_output' ? (
           <FloorOutputContent incomingItems={incomingItems} pw={pw} ph={ph} hw={hw} hh={hh} color={color} />
+        ) : obj.type === 'conveyor_lift_in' ? (
+          <ConveyorLiftContent label="LIFT IN"  incomingItems={incomingItems} pw={pw} ph={ph} hw={hw} hh={hh} color={color} />
+        ) : obj.type === 'conveyor_lift_out' ? (
+          <ConveyorLiftContent label="LIFT OUT" incomingItems={incomingItems} pw={pw} ph={ph} hw={hw} hh={hh} color={color} />
         ) : obj.recipeId ? (
           <RecipeContent obj={obj} pw={pw} ph={ph} hw={hw} hh={hh} color={color} />
         ) : (

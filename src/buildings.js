@@ -199,3 +199,21 @@ BUILDINGS_BY_KEY['connection_point'] = {
   inputs:  [{ type: 'belt', position: { side: 'west',  offset: 0 } }],
   outputs: [{ type: 'belt', position: { side: 'east',  offset: 0 } }],
 }
+
+BUILDINGS_BY_KEY['conveyor_lift_in'] = {
+  key:    'conveyor_lift_in',
+  label:  'Lift In',
+  color:  '#2ab870',
+  w: 4, h: 4,
+  inputs:  [{ type: 'belt', position: { side: 'south', offset: 0 } }],
+  outputs: [],
+}
+
+BUILDINGS_BY_KEY['conveyor_lift_out'] = {
+  key:    'conveyor_lift_out',
+  label:  'Lift Out',
+  color:  '#2ab870',
+  w: 4, h: 4,
+  inputs:  [],
+  outputs: [{ type: 'belt', position: { side: 'north', offset: 0 } }],
+}

@@ -9,7 +9,7 @@ import floorTextureUrl from './assets/floor.png'
 const CONNECTORS = [
   {
     key: 'floor_input',
-    label: 'Floor Input',
+    label: 'Factory Input',
     color: '#4a9eda',
     w: 4,
     h: 4,
@@ -18,7 +18,7 @@ const CONNECTORS = [
   },
   {
     key: 'floor_output',
-    label: 'Floor Output',
+    label: 'Factory Output',
     color: '#e8a013',
     w: 4,
     h: 4,
@@ -49,6 +49,15 @@ const CONNECTORS = [
       { type: 'belt', position: { side: 'east', offset: 0 } },
       { type: 'belt', position: { side: 'west', offset: 0 } },
     ],
+    outputs: [{ type: 'belt', position: { side: 'north', offset: 0 } }],
+  },
+  {
+    key: 'conveyor_lift',
+    label: 'Conveyor Lift',
+    color: '#2ab870',
+    w: 4,
+    h: 4,
+    inputs:  [{ type: 'belt', position: { side: 'south', offset: 0 } }],
     outputs: [{ type: 'belt', position: { side: 'north', offset: 0 } }],
   },
 ]
@@ -96,9 +105,12 @@ function loadLayerState() {
     const saved = localStorage.getItem(LAYER_KEY)
     if (saved) {
       const parsed = JSON.parse(saved)
-      _nextLayerId  = parsed.nextLayerId  ?? _nextLayerId
+      const layers = parsed.layers ?? []
+      // Guard: nextLayerId must exceed all existing layer IDs (mirrors syncIdCounters for objects)
+      const maxId = layers.reduce((m, l) => Math.max(m, l.id), 0)
+      _nextLayerId  = Math.max(parsed.nextLayerId  ?? _nextLayerId,  maxId + 1)
       _nextFloorNum = parsed.nextFloorNum ?? _nextFloorNum
-      return { layers: parsed.layers, selectedId: parsed.selectedId }
+      return { layers, selectedId: parsed.selectedId }
     }
   } catch {}
   return null

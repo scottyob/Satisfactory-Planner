@@ -115,7 +115,7 @@ export default function FloorInputModal({ open, item, ratePerMin, onConfirm, onC
       }}>
         {/* Header */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <span style={{ color: '#c8dff0', fontSize: 15, fontWeight: 600 }}>Configure Floor Input</span>
+          <span style={{ color: '#c8dff0', fontSize: 15, fontWeight: 600 }}>Configure Factory Input</span>
           <button
             onClick={onCancel}
             style={{

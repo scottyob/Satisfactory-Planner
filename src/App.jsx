@@ -7,11 +7,13 @@ import BuildingObject from './BuildingObject.jsx'
 import FloorInputModal from './FloorInputModal.jsx'
 import RecipeModal from './RecipeModal.jsx'
 import SplitterModal from './SplitterModal.jsx'
+import ConveyorLiftModal from './ConveyorLiftModal.jsx'
+import ConveyorLiftConfigModal from './ConveyorLiftConfigModal.jsx'
 import { BUILDINGS_BY_KEY } from './buildings.js'
 import { RECIPES_BY_ID } from './recipes.js'
 import BeltObject from './BeltObject.jsx'
 import DEMO_STATE from './demo.js'
-import { ALL_BUILDINGS_BY_KEY, getPortWorldPos, findNearestInputPort, computeBeltGroup, simulateBeltFlow } from './portUtils.js'
+import { ALL_BUILDINGS_BY_KEY, getPortWorldPos, findNearestInputPort, computeBeltGroup, simulateBeltFlow, computeAutoConnections } from './portUtils.js'
 
 // Error boundary to catch rendering errors and reset state
 class ErrorBoundary extends Component {
@@ -215,9 +217,11 @@ export default function App() {
   const [pendingBelt, setPendingBelt]       = useState(null)
   const [marquee, setMarquee]               = useState(null)
   const [fileName, setFileName]             = useState(null)
-  const [floorInputModal, setFloorInputModal] = useState({ open: false, objId: null })
-  const [recipeModal,     setRecipeModal]     = useState({ open: false, objId: null })
-  const [splitterModal,   setSplitterModal]   = useState({ open: false, objId: null })
+  const [floorInputModal,     setFloorInputModal]     = useState({ open: false, objId: null })
+  const [recipeModal,         setRecipeModal]         = useState({ open: false, objId: null })
+  const [splitterModal,       setSplitterModal]       = useState({ open: false, objId: null })
+  const [conveyorLiftModal,       setConveyorLiftModal]       = useState({ open: false, x: 0, y: 0 })
+  const [conveyorLiftConfigModal, setConveyorLiftConfigModal] = useState({ open: false, objId: null })
   const [tooltip, setTooltip]                 = useState(null) // { x, y, content: [{text,color}] } | null
 
   // Keep refs in sync with latest state for use in stable callbacks
@@ -299,8 +303,14 @@ export default function App() {
         const belts = beltsRef.current.filter(b => selIds.has(b.fromObjId) && selIds.has(b.toObjId))
         clipboardRef.current = { objects: objs, belts }
         saveHistoryRef.current()
-        setObjects(prev => prev.filter(o => !selIds.has(o.id)))
-        setBelts(prev => prev.filter(b => !selIds.has(b.fromObjId) && !selIds.has(b.toObjId)))
+        // Also remove linked conveyor lift partners
+        const linkedIds = new Set()
+        for (const o of objectsRef.current) {
+          if (selIds.has(o.id) && o.linkedLiftId) linkedIds.add(o.linkedLiftId)
+        }
+        const allDeleteIds = new Set([...selIds, ...linkedIds])
+        setObjects(prev => prev.filter(o => !allDeleteIds.has(o.id)))
+        setBelts(prev => prev.filter(b => !allDeleteIds.has(b.fromObjId) && !allDeleteIds.has(b.toObjId)))
         setSelectedObjIds(new Set())
         setSelectedBeltIds(new Set())
         return
@@ -342,8 +352,14 @@ export default function App() {
         if (selectedObjIdsRef.current.size > 0) {
           const ids = selectedObjIdsRef.current
           saveHistoryRef.current()
-          setObjects(prev => prev.filter(o => !ids.has(o.id)))
-          setBelts(prev => prev.filter(b => !ids.has(b.fromObjId) && !ids.has(b.toObjId)))
+          // Also delete linked conveyor lift partners
+          const linkedIds = new Set()
+          for (const o of objectsRef.current) {
+            if (ids.has(o.id) && o.linkedLiftId) linkedIds.add(o.linkedLiftId)
+          }
+          const allDeleteIds = new Set([...ids, ...linkedIds])
+          setObjects(prev => prev.filter(o => !allDeleteIds.has(o.id)))
+          setBelts(prev => prev.filter(b => !allDeleteIds.has(b.fromObjId) && !allDeleteIds.has(b.toObjId)))
           setSelectedObjIds(new Set())
         }
         if (selectedBeltIds.size > 0) {
@@ -506,20 +522,33 @@ export default function App() {
   const snap = (v) => Math.round(v / CELL_SIZE) * CELL_SIZE
 
   const addBuilding = useCallback((type) => {
-    saveHistory()
-    syncIdCounters(objectsRef.current, beltsRef.current)
     const vpX = (dimensions.width  / 2 - viewport.x) / viewport.scale
     const vpY = (dimensions.height / 2 - viewport.y) / viewport.scale
+    const x = snap(vpX)
+    const y = snap(vpY)
+
+    if (type === 'conveyor_lift') {
+      setConveyorLiftModal({ open: true, x, y })
+      return
+    }
+
+    saveHistory()
+    syncIdCounters(objectsRef.current, beltsRef.current)
     const obj = {
       id:       _nextObjId++,
       type,
       layerId:  selectedId,
       rotation: 0,
-      x:        snap(vpX),
-      y:        snap(vpY),
+      x,
+      y,
     }
     setObjects(prev => [...prev, obj])
     setSelectedObjIds(new Set([obj.id]))
+    const autoConns = computeAutoConnections(new Set([obj.id]), [...objectsRef.current, obj], beltsRef.current)
+    if (autoConns.length > 0) {
+      syncIdCounters(objectsRef.current, beltsRef.current)
+      setBelts(prev => [...prev, ...autoConns.map(b => ({ ...b, id: _nextBeltId++ }))])
+    }
     if (type === 'floor_input') {
       setFloorInputModal({ open: true, objId: obj.id })
     }
@@ -537,7 +566,15 @@ export default function App() {
   saveHistoryRef.current = saveHistory
 
   const updateObjPos = useCallback((id, x, y) => {
-    setObjects(prev => prev.map(o => o.id === id ? { ...o, x, y } : o))
+    setObjects(prev => {
+      const obj = prev.find(o => o.id === id)
+      const linkedId = obj?.linkedLiftId
+      return prev.map(o => {
+        if (o.id === id) return { ...o, x, y }
+        if (linkedId && o.id === linkedId) return { ...o, x, y }
+        return o
+      })
+    })
   }, [])
 
   const handleObjDragStart = useCallback((e, id) => {
@@ -555,7 +592,7 @@ export default function App() {
     dragStartPositionsRef.current = new Map(
       objectsRef.current
         .filter(o => toTrack.has(o.id))
-        .map(o => [o.id, { x: o.x, y: o.y }])
+        .map(o => [o.id, { x: o.x, y: o.y, rotation: o.rotation }])
     )
 
     // Alt drag: immediately add ghost copies at original positions so originals appear to stay put,
@@ -595,13 +632,33 @@ export default function App() {
     if (startPos && starts.size > 1) {
       const dx = x - startPos.x
       const dy = y - startPos.y
-      setObjects(prev => prev.map(o => {
-        if (o.id === id) return { ...o, x, y }
-        const sp = starts.get(o.id)
-        return sp ? { ...o, x: snap(sp.x + dx), y: snap(sp.y + dy) } : o
-      }))
+      setObjects(prev => {
+        const newPositions = new Map()
+        newPositions.set(id, { x, y })
+        for (const [oid, sp] of starts) {
+          if (oid !== id) newPositions.set(oid, { x: snap(sp.x + dx), y: snap(sp.y + dy) })
+        }
+        // Sync linked lift positions — skip during alt-drag (partner is copied separately on drop)
+        if (!isAltDragRef.current) {
+          for (const o of prev) {
+            if (o.linkedLiftId && newPositions.has(o.id) && !newPositions.has(o.linkedLiftId)) {
+              newPositions.set(o.linkedLiftId, newPositions.get(o.id))
+            }
+          }
+        }
+        return prev.map(o => {
+          const pos = newPositions.get(o.id)
+          return pos ? { ...o, x: pos.x, y: pos.y } : o
+        })
+      })
     } else {
-      updateObjPos(id, x, y)
+      // During alt-drag, only move the dragged object; linked lift partner stays put
+      // and gets its own copy created at drop time
+      if (isAltDragRef.current) {
+        setObjects(prev => prev.map(o => o.id === id ? { ...o, x, y } : o))
+      } else {
+        updateObjPos(id, x, y)
+      }
     }
   }, [updateObjPos])
 
@@ -628,6 +685,29 @@ export default function App() {
         idMap.set(oid, newId)
         return { ...orig, id: newId, x: snap(sp.x + dx), y: snap(sp.y + dy) }
       }).filter(Boolean)
+
+      // Fix conveyor lift linkedLiftId references on copies, and create
+      // copies of any linked partners that weren't part of the drag selection.
+      const extraLinkedCopies = []
+      for (const oid of dragged) {
+        const copy = copies.find(c => c.id === idMap.get(oid))
+        if (!copy || (copy.type !== 'conveyor_lift_in' && copy.type !== 'conveyor_lift_out')) continue
+        const orig = objectsRef.current.find(o => o.id === oid)
+        if (!orig?.linkedLiftId) { copy.linkedLiftId = undefined; continue }
+        if (idMap.has(orig.linkedLiftId)) {
+          // Partner was also dragged — re-link copy to the partner copy
+          copy.linkedLiftId = idMap.get(orig.linkedLiftId)
+        } else {
+          // Partner was not dragged — copy it at the same new position
+          const linkedOrig = objectsRef.current.find(o => o.id === orig.linkedLiftId)
+          if (!linkedOrig) { copy.linkedLiftId = undefined; continue }
+          const newLinkedId = _nextObjId++
+          extraLinkedCopies.push({ ...linkedOrig, id: newLinkedId, x: copy.x, y: copy.y, linkedLiftId: copy.id })
+          copy.linkedLiftId = newLinkedId
+        }
+      }
+
+      const allCopies  = [...copies, ...extraLinkedCopies]
       const ghostIds   = altGhostIdsRef.current
       const ghostIdMap = altGhostIdMapRef.current
       // Belts were rerouted to ghost IDs during drag start; resolve back to original IDs for inter-copy belt detection
@@ -640,8 +720,12 @@ export default function App() {
       altGhostIdsRef.current   = new Set()
       altGhostIdMapRef.current = new Map()
       setObjects(prev => [
-        ...prev.filter(o => !ghostIds.has(o.id)).map(o => { const sp = starts?.get(o.id); return sp ? { ...o, x: sp.x, y: sp.y } : o }),
-        ...copies,
+        // Reset originals to their exact start state (x, y, and rotation)
+        ...prev.filter(o => !ghostIds.has(o.id)).map(o => {
+          const sp = starts?.get(o.id)
+          return sp ? { ...o, x: sp.x, y: sp.y, rotation: sp.rotation ?? o.rotation } : o
+        }),
+        ...allCopies,
       ])
       setBelts(prev => {
         const rerouted = reverseGhostMapEarly.size > 0
@@ -659,13 +743,42 @@ export default function App() {
     if (startPos && starts.size > 1) {
       const dx = x - startPos.x
       const dy = y - startPos.y
-      setObjects(prev => prev.map(o => {
-        if (o.id === id) return { ...o, x, y }
-        const sp = starts.get(o.id)
-        return sp ? { ...o, x: snap(sp.x + dx), y: snap(sp.y + dy) } : o
-      }))
+      const newPositions = new Map()
+      newPositions.set(id, { x, y })
+      for (const [oid, sp] of starts) {
+        if (oid !== id) newPositions.set(oid, { x: snap(sp.x + dx), y: snap(sp.y + dy) })
+      }
+      for (const o of objectsRef.current) {
+        if (o.linkedLiftId && newPositions.has(o.id) && !newPositions.has(o.linkedLiftId)) {
+          newPositions.set(o.linkedLiftId, newPositions.get(o.id))
+        }
+      }
+      const updatedObjects = objectsRef.current.map(o => {
+        const pos = newPositions.get(o.id)
+        return pos ? { ...o, x: pos.x, y: pos.y } : o
+      })
+      setObjects(updatedObjects)
+      const movedIds = new Set(newPositions.keys())
+      const autoConns = computeAutoConnections(movedIds, updatedObjects, beltsRef.current)
+      if (autoConns.length > 0) {
+        syncIdCounters(objectsRef.current, beltsRef.current)
+        setBelts(prev => [...prev, ...autoConns.map(b => ({ ...b, id: _nextBeltId++ }))])
+      }
     } else {
+      const orig = objectsRef.current.find(o => o.id === id)
+      const linkedId = orig?.linkedLiftId
+      const updatedObjects = objectsRef.current.map(o => {
+        if (o.id === id) return { ...o, x, y }
+        if (linkedId && o.id === linkedId) return { ...o, x, y }
+        return o
+      })
       updateObjPos(id, x, y)
+      const movedIds = new Set([id, ...(linkedId ? [linkedId] : [])])
+      const autoConns = computeAutoConnections(movedIds, updatedObjects, beltsRef.current)
+      if (autoConns.length > 0) {
+        syncIdCounters(objectsRef.current, beltsRef.current)
+        setBelts(prev => [...prev, ...autoConns.map(b => ({ ...b, id: _nextBeltId++ }))])
+      }
     }
     dragStartPositionsRef.current = null
   }, [updateObjPos])
@@ -770,6 +883,67 @@ export default function App() {
     setObjects(prev => prev.map(o => o.id === objId ? { ...o, outputFilters } : o))
     setSplitterModal({ open: false, objId: null })
   }, [splitterModal])
+
+  const handleConveyorLiftConfirm = useCallback((targetLayerId) => {
+    saveHistoryRef.current()
+    syncIdCounters(objectsRef.current, beltsRef.current)
+    const { x, y } = conveyorLiftModal
+    const inId  = _nextObjId++
+    const outId = _nextObjId++
+    setObjects(prev => [...prev,
+      { id: inId,  type: 'conveyor_lift_in',  layerId: selectedId,     rotation: 0, x, y, linkedLiftId: outId },
+      { id: outId, type: 'conveyor_lift_out', layerId: targetLayerId,  rotation: 0, x, y, linkedLiftId: inId  },
+    ])
+    setSelectedObjIds(new Set([inId]))
+    setConveyorLiftModal({ open: false, x: 0, y: 0 })
+  }, [conveyorLiftModal, selectedId])
+
+  const handleConveyorLiftConfigConfirm = useCallback(({ targetLayerId, isCurrentIn }) => {
+    const objId = conveyorLiftConfigModal.objId
+    saveHistoryRef.current()
+    syncIdCounters(objectsRef.current, beltsRef.current)
+
+    const obj       = objectsRef.current.find(o => o.id === objId)
+    if (!obj) { setConveyorLiftConfigModal({ open: false, objId: null }); return }
+    const linkedObj = objectsRef.current.find(o => o.id === obj.linkedLiftId)
+
+    const newCurrentType = isCurrentIn ? 'conveyor_lift_in' : 'conveyor_lift_out'
+    const newLinkedType  = isCurrentIn ? 'conveyor_lift_out' : 'conveyor_lift_in'
+
+    const floorChanged     = linkedObj && linkedObj.layerId !== targetLayerId
+    const directionChanged = obj.type !== newCurrentType
+
+    if (floorChanged || !linkedObj) {
+      // Delete old linked object and its connected belts, create new one on target floor
+      const oldLinkedId = linkedObj?.id
+      const newLinkedId = _nextObjId++
+      setObjects(prev => [
+        ...prev
+          .filter(o => o.id !== oldLinkedId)
+          .map(o => o.id === objId ? { ...o, type: newCurrentType, linkedLiftId: newLinkedId } : o),
+        { id: newLinkedId, type: newLinkedType, layerId: targetLayerId, rotation: 0, x: obj.x, y: obj.y, linkedLiftId: objId },
+      ])
+      if (oldLinkedId != null) {
+        setBelts(prev => prev.filter(b => b.fromObjId !== oldLinkedId && b.toObjId !== oldLinkedId))
+      }
+    } else {
+      // Floor unchanged — just update types and delete affected belts if direction flipped
+      setObjects(prev => prev.map(o => {
+        if (o.id === objId)          return { ...o, type: newCurrentType }
+        if (linkedObj && o.id === linkedObj.id) return { ...o, type: newLinkedType }
+        return o
+      }))
+      if (directionChanged) {
+        // Belt ports changed; remove belts connected to either lift
+        setBelts(prev => prev.filter(b =>
+          b.fromObjId !== objId && b.toObjId !== objId &&
+          b.fromObjId !== linkedObj?.id && b.toObjId !== linkedObj?.id
+        ))
+      }
+    }
+
+    setConveyorLiftConfigModal({ open: false, objId: null })
+  }, [conveyorLiftConfigModal])
 
   // Click on stage background: deselect (unless ending a marquee drag)
   const handleStageClick = useCallback((e) => {
@@ -1452,6 +1626,8 @@ export default function App() {
                           ? () => setFloorInputModal({ open: true, objId: obj.id })
                           : obj.type === 'splitter'
                           ? () => setSplitterModal({ open: true, objId: obj.id })
+                          : (obj.type === 'conveyor_lift_in' || obj.type === 'conveyor_lift_out')
+                          ? () => setConveyorLiftConfigModal({ open: true, objId: obj.id })
                           : BUILDINGS_BY_KEY[obj.type]
                           ? () => setRecipeModal({ open: true, objId: obj.id })
                           : undefined
@@ -1486,12 +1662,18 @@ export default function App() {
                       occupiedOutputs={beltsByFromObj[obj.id]}
                       occupiedInputs={beltsByToObj[obj.id]}
                       pendingBeltType={pendingBelt?.portType ?? null}
-                      incomingItems={obj.type === 'floor_output'
-                        ? belts
-                            .filter(b => b.toObjId === obj.id)
-                            .map(b => ({ item: itemByBelt.get(b.id) ?? null, rate: flowByBelt.get(b.id) ?? 0 }))
-                            .filter(x => x.item)
-                        : undefined}
+                      incomingItems={
+                        obj.type === 'floor_output' || obj.type === 'conveyor_lift_in'
+                          ? belts
+                              .filter(b => b.toObjId === obj.id)
+                              .map(b => ({ item: itemByBelt.get(b.id) ?? null, rate: flowByBelt.get(b.id) ?? 0 }))
+                              .filter(x => x.item)
+                          : obj.type === 'conveyor_lift_out'
+                          ? belts
+                              .filter(b => b.fromObjId === obj.id)
+                              .map(b => ({ item: itemByBelt.get(b.id) ?? null, rate: flowByBelt.get(b.id) ?? 0 }))
+                              .filter(x => x.item)
+                          : undefined}
                     />
                   ))}
                 </Layer>
@@ -1586,6 +1768,30 @@ export default function App() {
         onConfirm={handleSplitterConfirm}
         onCancel={() => setSplitterModal({ open: false, objId: null })}
       />
+
+      <ConveyorLiftModal
+        open={conveyorLiftModal.open}
+        layers={layers}
+        currentLayerId={selectedId}
+        onConfirm={handleConveyorLiftConfirm}
+        onCancel={() => setConveyorLiftModal({ open: false, x: 0, y: 0 })}
+      />
+
+      {(() => {
+        const obj       = objects.find(o => o.id === conveyorLiftConfigModal.objId)
+        const linkedObj = objects.find(o => o.id === obj?.linkedLiftId)
+        return (
+          <ConveyorLiftConfigModal
+            open={conveyorLiftConfigModal.open}
+            layers={layers}
+            currentLayerId={obj?.layerId ?? selectedId}
+            linkedLayerId={linkedObj?.layerId ?? null}
+            isCurrentIn={obj?.type === 'conveyor_lift_in'}
+            onConfirm={handleConveyorLiftConfigConfirm}
+            onCancel={() => setConveyorLiftConfigModal({ open: false, objId: null })}
+          />
+        )
+      })()}
 
       {/* Tooltip */}
       {tooltip && (
