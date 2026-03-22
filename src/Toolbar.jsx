@@ -170,13 +170,25 @@ function FileMenu({ onNew, onSave, onLoad, onLoadDemo }) {
   )
 }
 
-function ViewMenu({ viewOptions, onToggle }) {
-  const [open, setOpen] = useState(false)
+const FOUNDATION_OPACITY_OPTIONS = [
+  { label: '100%', value: 1.00 },
+  { label: '75%',  value: 0.75 },
+  { label: '50%',  value: 0.50 },
+  { label: '25%',  value: 0.25 },
+  { label: 'Hidden', value: 0 },
+]
+
+function ViewMenu({ viewOptions, onToggle, foundationOpacity, onFoundationOpacityChange }) {
+  const [open, setOpen]               = useState(false)
+  const [foundationOpen, setFoundationOpen] = useState(false)
   const menuRef = useRef(null)
 
   useEffect(() => {
     const handleClickOutside = (e) => {
-      if (menuRef.current && !menuRef.current.contains(e.target)) setOpen(false)
+      if (menuRef.current && !menuRef.current.contains(e.target)) {
+        setOpen(false)
+        setFoundationOpen(false)
+      }
     }
     if (open) document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
@@ -189,17 +201,20 @@ function ViewMenu({ viewOptions, onToggle }) {
     padding: '6px 12px', cursor: 'pointer',
   }
 
+  const currentOpacityLabel = FOUNDATION_OPACITY_OPTIONS.find(o => Math.abs(o.value - foundationOpacity) < 0.01)?.label ?? `${Math.round(foundationOpacity * 100)}%`
+
   return (
     <div ref={menuRef} style={{ position: 'relative' }}>
-      <button style={btnStyle} onClick={() => setOpen(!open)}>View</button>
+      <button style={btnStyle} onClick={() => { setOpen(!open); setFoundationOpen(false) }}>View</button>
       {open && (
         <div style={{
           position: 'absolute', top: '100%', left: 0,
           background: '#0d1b2a', border: '1px solid #2e5f8a',
-          borderRadius: 5, minWidth: 150,
+          borderRadius: 5, minWidth: 200,
           boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
           zIndex: 100,
         }}>
+          {/* Checkbox toggles */}
           {viewOptions.map(({ id, label }) => (
             <button key={id} style={menuItemStyle} onClick={() => onToggle(id)}>
               <span style={{
@@ -210,6 +225,45 @@ function ViewMenu({ viewOptions, onToggle }) {
               {label}
             </button>
           ))}
+
+          {/* Divider */}
+          <div style={{ height: 1, background: '#1e3a54', margin: '4px 0' }} />
+
+          {/* Foundation Transparency submenu */}
+          <button
+            style={{ ...menuItemStyle, justifyContent: 'space-between' }}
+            onClick={() => setFoundationOpen(o => !o)}
+          >
+            <span>Foundation Transparency</span>
+            <span style={{ color: '#4a9eda', fontSize: 11 }}>{currentOpacityLabel} {foundationOpen ? '▴' : '▾'}</span>
+          </button>
+          {foundationOpen && (
+            <div style={{ background: '#0a1520', borderTop: '1px solid #1e3a54' }}>
+              {FOUNDATION_OPACITY_OPTIONS.map(({ label, value }) => {
+                const active = Math.abs(value - foundationOpacity) < 0.01
+                return (
+                  <button
+                    key={label}
+                    style={{
+                      ...menuItemStyle,
+                      paddingLeft: 28,
+                      color: active ? '#4a9eda' : '#c8dff0',
+                      background: active ? '#112233' : 'transparent',
+                    }}
+                    onClick={() => { onFoundationOpacityChange(value); setOpen(false); setFoundationOpen(false) }}
+                  >
+                    <span style={{
+                      width: 8, height: 8, borderRadius: '50%',
+                      border: `1px solid ${active ? '#4a9eda' : '#2e5f8a'}`,
+                      background: active ? '#4a9eda' : 'transparent',
+                      flexShrink: 0,
+                    }} />
+                    {label}
+                  </button>
+                )
+              })}
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -276,7 +330,7 @@ function EditableTitle({ fileName, onRename }) {
   )
 }
 
-export default function Toolbar({ tool, onToolChange, selectFilter, onSelectFilterChange, viewOptions, onViewToggle, fileName, onRename, onSave, onLoad, onNew, onLoadDemo }) {
+export default function Toolbar({ tool, onToolChange, selectFilter, onSelectFilterChange, viewOptions, onViewToggle, foundationOpacity, onFoundationOpacityChange, fileName, onRename, onSave, onLoad, onNew, onLoadDemo }) {
   return (
     <div
       style={{
@@ -299,7 +353,7 @@ export default function Toolbar({ tool, onToolChange, selectFilter, onSelectFilt
       <div style={{ width: 1, height: 24, background: '#1e3a54', margin: '0 8px' }} />
 
       <FileMenu onNew={onNew} onSave={onSave} onLoad={onLoad} onLoadDemo={onLoadDemo} />
-      <ViewMenu viewOptions={viewOptions} onToggle={onViewToggle} />
+      <ViewMenu viewOptions={viewOptions} onToggle={onViewToggle} foundationOpacity={foundationOpacity} onFoundationOpacityChange={onFoundationOpacityChange} />
 
       <div style={{ width: 1, height: 24, background: '#1e3a54', margin: '0 8px' }} />
 

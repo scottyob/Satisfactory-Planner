@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef, useMemo, Component } from 'react'
-import { Stage, Layer, Line, Rect } from 'react-konva'
-import { CELL_SIZE, GRID_CELLS, GRID_PX, PANEL_WIDTH, TOOLBAR_HEIGHT } from './constants'
+import { Stage, Layer, Line, Rect, Group } from 'react-konva'
+import { CELL_SIZE, GRID_CELLS, GRID_PX, PANEL_WIDTH, TOOLBAR_HEIGHT, effectiveBeltTier } from './constants'
 import Toolbar from './Toolbar.jsx'
 import LayersPanel, { useLayers, FOUNDATIONS_BY_KEY } from './LayersPanel.jsx'
 import BuildingObject from './BuildingObject.jsx'
@@ -195,6 +195,7 @@ export default function App() {
   const [viewOptions, setViewOptions] = useState([
     { id: 'foundations', label: 'Foundations', visible: true },
   ])
+  const [foundationOpacity, setFoundationOpacity] = useState(1.0)
 
   const stageW = () => window.innerWidth  - PANEL_WIDTH
   const stageH = () => window.innerHeight - TOOLBAR_HEIGHT
@@ -450,11 +451,14 @@ export default function App() {
       if (s.item) drainByItem[s.item] = (drainByItem[s.item] ?? 0) + s.rate
     }
 
+    const thisBelt     = beltsRef.current.find(b => b.id === beltId)
     const thisBeltRate = flowByBeltRef.current?.get(beltId)
     const allItems = [...new Set([...Object.keys(feedByItem), ...Object.keys(drainByItem)])]
     const content = []
     if (thisBeltRate != null) {
-      content.push({ text: `This belt  ${fmt(thisBeltRate)}`, color: '#c8dff0' })
+      const mk = thisBelt?.beltTier ?? effectiveBeltTier(thisBeltRate)
+      const rateStr = (thisBeltRate % 1 === 0 ? String(thisBeltRate) : thisBeltRate.toFixed(1)) + '/m'
+      content.push({ text: `Belt (MK${mk}) - ${rateStr}`, color: '#c8dff0' })
       content.push({ text: '─────────────────', color: '#1e3a54' })
     }
     allItems.forEach((item, idx) => {
@@ -1505,6 +1509,8 @@ export default function App() {
         selectFilter={selectFilter} onSelectFilterChange={setSelectFilter}
         viewOptions={viewOptions}
         onViewToggle={(id) => setViewOptions(prev => prev.map(o => o.id === id ? { ...o, visible: !o.visible } : o))}
+        foundationOpacity={foundationOpacity}
+        onFoundationOpacityChange={setFoundationOpacity}
         fileName={fileName} onRename={setFileName}
         onSave={handleSave} onLoad={handleLoad} onNew={handleNew} onLoadDemo={handleLoadDemo}
       />
@@ -1544,7 +1550,8 @@ export default function App() {
               return (
                 <Layer key={layer.id} opacity={opacity} listening={isActive}>
                   {/* Z-order: foundations (bottom) → belts → buildings (top) */}
-                  {viewOptions.find(o => o.id === 'foundations')?.visible && layerFoundations.map(obj => (
+                  {viewOptions.find(o => o.id === 'foundations')?.visible && <Group opacity={foundationOpacity}>
+                  {layerFoundations.map(obj => (
                     <BuildingObject
                       key={obj.id}
                       obj={obj}
@@ -1585,7 +1592,7 @@ export default function App() {
                       pendingBeltType={null}
                       incomingItems={undefined}
                     />
-                  ))}
+                  ))}</Group>}
 
                   {layerBelts.map(belt => (
                     <BeltObject
@@ -1594,6 +1601,7 @@ export default function App() {
                       objects={objects}
                       isSelected={selectedBeltIds.has(belt.id)}
                       flowStatus={beltStatuses.get(belt.id) ?? null}
+                      flowRate={flowByBelt.get(belt.id) ?? 0}
                       onMouseDown={(e) => handleBeltMouseDown(e, belt.id)}
                       onDblClick={(e) => handleBeltDblClick(e, belt.id)}
                       onBeltHover={() => handleBeltHover(belt.id)}

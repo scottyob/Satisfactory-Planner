@@ -1,24 +1,50 @@
 import { useEffect, useRef } from 'react'
 import { Group, Rect, Shape } from 'react-konva'
-import { CELL_SIZE } from './constants'
+import { CELL_SIZE, effectiveBeltTier } from './constants'
 import { ALL_BUILDINGS_BY_KEY, getPortWorldPos } from './portUtils'
 
 const BELT_FILL     = '#1a2a38'
-const BELT_BORDER   = '#3a5a7a'
 const BELT_SELECTED = '#4a9eda'
-const CHEVRON_COLOR = '#e8a013'
-const BELT_H        = CELL_SIZE * 2  // total height of belt rect
-const CHEVRON_SPEED = 0.08           // px per animation frame
 
-export default function BeltObject({ belt, objects, isSelected, flowStatus, onMouseDown, onDblClick, onBeltHover, onBeltLeave }) {
-  const offsetRef = useRef(0)
-  const shapeRef  = useRef(null)
+// Belt tier colors (border + chevron) — matches Satisfactory MK1–MK6 palette
+const BELT_TIER_COLORS = {
+  1: '#e8a013', // MK1 — orange
+  2: '#4ab84a', // MK2 — green
+  3: '#29b6d8', // MK3 — cyan
+  4: '#4a7eda', // MK4 — blue
+  5: '#a855f7', // MK5 — purple
+  6: '#f5d020', // MK6 — gold
+}
+
+// Chevron speed per tier — MK2 (0.08) is the baseline
+const BELT_TIER_SPEEDS = {
+  1: 0.04,  // MK1  60/min
+  2: 0.08,  // MK2 120/min
+  3: 0.18,  // MK3 270/min
+  4: 0.32,  // MK4 480/min
+  5: 0.52,  // MK5 780/min
+  6: 0.80,  // MK6 1200/min
+}
+
+
+const BELT_H = CELL_SIZE * 2  // total height of belt rect
+
+export default function BeltObject({ belt, objects, isSelected, flowStatus, flowRate, onMouseDown, onDblClick, onBeltHover, onBeltLeave }) {
+  // Use explicit tier if set; otherwise derive from actual flow rate
+  const tier      = belt.beltTier ?? effectiveBeltTier(flowRate ?? 0)
+  const tierColor = BELT_TIER_COLORS[tier] ?? BELT_TIER_COLORS[1]
+  const chevSpeed = BELT_TIER_SPEEDS[tier] ?? BELT_TIER_SPEEDS[1]
+
+  const offsetRef    = useRef(0)
+  const shapeRef     = useRef(null)
+  const chevSpeedRef = useRef(chevSpeed)
+  chevSpeedRef.current = chevSpeed  // keep ref in sync without restarting rAF loop
 
   // rAF loop — mutates shape directly without touching React state
   useEffect(() => {
     let frameId
     const tick = () => {
-      offsetRef.current = (offsetRef.current + CHEVRON_SPEED) % (CELL_SIZE * 2)
+      offsetRef.current = (offsetRef.current + chevSpeedRef.current) % (CELL_SIZE * 2)
       shapeRef.current?.getLayer()?.batchDraw()
       frameId = requestAnimationFrame(tick)
     }
@@ -64,7 +90,7 @@ export default function BeltObject({ belt, objects, isSelected, flowStatus, onMo
         width={len}
         height={BELT_H}
         fill={BELT_FILL}
-        stroke={isSelected ? BELT_SELECTED : flowStatus ? warnColor : BELT_BORDER}
+        stroke={isSelected ? BELT_SELECTED : flowStatus ? warnColor : tierColor}
         strokeWidth={isSelected ? 2 : flowStatus ? 1.5 : 1}
         cornerRadius={2}
         onMouseDown={onMouseDown}
@@ -112,7 +138,7 @@ export default function BeltObject({ belt, objects, isSelected, flowStatus, onMo
           const opacity = flowStatus
             ? 0.4 + 0.6 * (Math.sin(phase * Math.PI * 2) * 0.5 + 0.5)
             : 0.45
-          const color = flowStatus ? warnColor : CHEVRON_COLOR
+          const color = flowStatus ? warnColor : tierColor
           ctx.save()
           ctx.strokeStyle = color
           ctx.lineWidth   = 0.8
