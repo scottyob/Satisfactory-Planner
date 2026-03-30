@@ -181,7 +181,7 @@ const FOUNDATION_OPACITY_OPTIONS = [
   { label: 'Hidden', value: 0 },
 ]
 
-function ViewMenu({ viewOptions, onToggle, foundationOpacity, onFoundationOpacityChange }) {
+function ViewMenu({ viewOptions, onToggle, foundationOpacity, onFoundationOpacityChange, viewMode, onViewModeChange }) {
   const [open, setOpen]               = useState(false)
   const [foundationOpen, setFoundationOpen] = useState(false)
   const menuRef = useRef(null)
@@ -228,6 +228,18 @@ function ViewMenu({ viewOptions, onToggle, foundationOpacity, onFoundationOpacit
               {label}
             </button>
           ))}
+
+          {/* Divider */}
+          <div style={{ height: 1, background: '#1e3a54', margin: '4px 0' }} />
+
+          {/* World View toggle */}
+          <button
+            style={{ ...menuItemStyle, justifyContent: 'space-between' }}
+            onClick={() => { onViewModeChange?.(viewMode === 'world' ? 'factory' : 'world'); setOpen(false) }}
+          >
+            <span>World View</span>
+            <span style={{ color: '#4a9eda', fontSize: 10 }}>{viewMode === 'world' ? '✓' : ''} W</span>
+          </button>
 
           {/* Divider */}
           <div style={{ height: 1, background: '#1e3a54', margin: '4px 0' }} />
@@ -333,7 +345,7 @@ function EditableTitle({ fileName, onRename }) {
   )
 }
 
-export default function Toolbar({ tool, onToolChange, selectFilter, onSelectFilterChange, viewOptions, onViewToggle, foundationOpacity, onFoundationOpacityChange, fileName, onRename, onSave, onSaveAs, onLoad, onNew, onLoadDemo }) {
+export default function Toolbar({ tool, onToolChange, selectFilter, onSelectFilterChange, viewOptions, onViewToggle, foundationOpacity, onFoundationOpacityChange, fileName, onRename, onSave, onSaveAs, onLoad, onNew, onLoadDemo, viewMode, onViewModeChange }) {
   return (
     <div
       style={{
@@ -356,7 +368,7 @@ export default function Toolbar({ tool, onToolChange, selectFilter, onSelectFilt
       <div style={{ width: 1, height: 24, background: '#1e3a54', margin: '0 8px' }} />
 
       <FileMenu onNew={onNew} onSave={onSave} onSaveAs={onSaveAs} onLoad={onLoad} onLoadDemo={onLoadDemo} />
-      <ViewMenu viewOptions={viewOptions} onToggle={onViewToggle} foundationOpacity={foundationOpacity} onFoundationOpacityChange={onFoundationOpacityChange} />
+      <ViewMenu viewOptions={viewOptions} onToggle={onViewToggle} foundationOpacity={foundationOpacity} onFoundationOpacityChange={onFoundationOpacityChange} viewMode={viewMode} onViewModeChange={onViewModeChange} />
 
       <div style={{ width: 1, height: 24, background: '#1e3a54', margin: '0 8px' }} />
 

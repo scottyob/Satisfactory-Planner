@@ -95,26 +95,37 @@ export function loadWorkspace() {
   return { version: 2, activeFactoryId: 1, factories: [factory] }
 }
 
-function writeWorkspace(factories, activeFactoryId) {
-  localStorage.setItem(WORKSPACE_KEY, JSON.stringify({ version: 2, activeFactoryId, factories }))
+const DEFAULT_WORLD_STATE = {
+  worldFactories: [],  // { factoryId, x, y, connectors: [{id, side, offset, kind, flow, item, perMin}] }
+  buses: [],           // { id, item, axis:'h'|'v', x1, y1, x2, y2 }
+  taps: [],            // { id, busId, factoryId, connectorId, snapPos }
+  nextWorldId: 1,
+  viewport: { scale: 0.25, x: 0, y: 0 },
+}
+
+function writeWorkspace(factories, activeFactoryId, worldState) {
+  localStorage.setItem(WORKSPACE_KEY, JSON.stringify({ version: 2, activeFactoryId, factories, worldState: worldState ?? DEFAULT_WORLD_STATE }))
 }
 
 export default function useFactories() {
   const initialWs            = loadWorkspace()
   const [factories,         setFactories]         = useState(initialWs.factories)
   const [activeFactoryId,   setActiveFactoryId]   = useState(initialWs.activeFactoryId)
+  const [worldState,        setWorldState]         = useState(initialWs.worldState ?? DEFAULT_WORLD_STATE)
+  const worldStateRef = useRef(worldState)
+  worldStateRef.current = worldState
   const saveTimerRef = useRef(null)
 
-  const scheduleWrite = useCallback((newFactories, newActiveId) => {
+  const scheduleWrite = useCallback((newFactories, newActiveId, newWorldState) => {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
-    saveTimerRef.current = setTimeout(() => writeWorkspace(newFactories, newActiveId), 300)
+    saveTimerRef.current = setTimeout(() => writeWorkspace(newFactories, newActiveId, newWorldState ?? worldStateRef.current), 300)
   }, [])
 
   // Update the active factory's stored snapshot
   const patchActiveFactory = useCallback((snapshot) => {
     setFactories(prev => {
       const next = prev.map(f => f.id === snapshot.id ? snapshot : f)
-      scheduleWrite(next, snapshot.id)
+      scheduleWrite(next, snapshot.id, worldStateRef.current)
       return next
     })
   }, [scheduleWrite])
@@ -127,7 +138,7 @@ export default function useFactories() {
       : blankFactory(id, typeof nameOrSnapshot === 'string' ? nameOrSnapshot : undefined)
     setFactories(prev => {
       const next = [...prev, factory]
-      scheduleWrite(next, id)
+      scheduleWrite(next, id, worldStateRef.current)
       return next
     })
     setActiveFactoryId(id)
@@ -139,7 +150,7 @@ export default function useFactories() {
     setFactories(prev => {
       if (prev.length <= 1) return prev
       const next = prev.filter(f => f.id !== deleteId)
-      scheduleWrite(next, newActiveId)
+      scheduleWrite(next, newActiveId, worldStateRef.current)
       return next
     })
     setActiveFactoryId(newActiveId)
@@ -148,7 +159,7 @@ export default function useFactories() {
   const renameFactory = useCallback((id, name) => {
     setFactories(prev => {
       const next = prev.map(f => f.id === id ? { ...f, name } : f)
-      setActiveFactoryId(cur => { scheduleWrite(next, cur); return cur })
+      setActiveFactoryId(cur => { scheduleWrite(next, cur, worldStateRef.current); return cur })
       return next
     })
   }, [scheduleWrite])
@@ -158,6 +169,27 @@ export default function useFactories() {
     setActiveFactoryId(id)
   }, [])
 
+  const patchWorldState = useCallback((partial) => {
+    setWorldState(prev => {
+      const next = { ...prev, ...partial }
+      worldStateRef.current = next
+      setFactories(facs => {
+        scheduleWrite(facs, activeFactoryId, next)
+        return facs
+      })
+      return next
+    })
+  }, [scheduleWrite, activeFactoryId])
+
+  const setWorldStateAndSave = useCallback((newState) => {
+    setWorldState(newState)
+    worldStateRef.current = newState
+    setFactories(facs => {
+      scheduleWrite(facs, activeFactoryId, newState)
+      return facs
+    })
+  }, [scheduleWrite, activeFactoryId])
+
   return {
     factories,
     activeFactoryId,
@@ -166,5 +198,8 @@ export default function useFactories() {
     renameFactory,
     setActiveFactory,
     patchActiveFactory,
+    worldState,
+    setWorldState: setWorldStateAndSave,
+    patchWorldState,
   }
 }

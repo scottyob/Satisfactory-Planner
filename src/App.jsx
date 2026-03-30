@@ -16,6 +16,8 @@ import { RECIPES_BY_ID } from './recipes.js'
 import BeltObject from './BeltObject.jsx'
 import DEMO_STATE from './demo.js'
 import { ALL_BUILDINGS_BY_KEY, getPortWorldPos, findNearestInputPort, computeBeltGroup, simulateBeltFlow, computeAutoConnections } from './portUtils.js'
+import WorldCanvas from './WorldCanvas.jsx'
+import WorldPanel from './WorldPanel.jsx'
 
 // Error boundary to catch rendering errors and reset state
 class ErrorBoundary extends Component {
@@ -178,7 +180,17 @@ export default function App() {
     renameFactory,
     setActiveFactory,
     patchActiveFactory,
+    worldState,
+    setWorldState,
+    patchWorldState,
   } = useFactories()
+
+  const [viewMode, setViewMode] = useState('factory') // 'factory' | 'world'
+  const [selectedWorldFactoryId, setSelectedWorldFactoryId] = useState(null)
+  // Bus creation state: null | { open, item, axis, confirmed, clickCount, x1, y1 }
+  const [busForm, setBusForm] = useState(null)
+  // Pending bus point (after first click): { x1, y1 }
+  const [pendingBusPoint, setPendingBusPoint] = useState(null)
 
   const stageW = () => window.innerWidth  - PANEL_WIDTH
   const stageH = () => window.innerHeight - TOOLBAR_HEIGHT - FACTORY_TAB_HEIGHT
@@ -354,6 +366,7 @@ export default function App() {
 
       if (e.key === 'h' || e.key === 'H') setTool('pan')
       if (e.key === 'v' || e.key === 'V') setTool('pointer')
+      if (e.key === 'w' || e.key === 'W') setViewMode(m => m === 'world' ? 'factory' : 'world')
       if (e.key === 'Escape') {
         setSelectedObjIds(new Set())
         setSelectedBeltIds(new Set())
@@ -1599,6 +1612,7 @@ export default function App() {
         onFoundationOpacityChange={setFoundationOpacity}
         fileName={activeFactoryName} onRename={(name) => renameFactory(activeFactoryId, name)}
         onSave={handleSave} onSaveAs={handleSaveAs} onLoad={handleLoad} onNew={handleNew} onLoadDemo={handleLoadDemo}
+        viewMode={viewMode} onViewModeChange={setViewMode}
       />
 
       <div style={{ position: 'absolute', top: TOOLBAR_HEIGHT, left: 0, width: `calc(100vw - ${PANEL_WIDTH}px)` }}>
@@ -1613,7 +1627,48 @@ export default function App() {
         />
       </div>
 
-      <div style={{ position: 'absolute', top: TOOLBAR_HEIGHT + FACTORY_TAB_HEIGHT, left: 0 }}>
+      {viewMode === 'world' && (
+        <div style={{ position: 'absolute', top: TOOLBAR_HEIGHT + FACTORY_TAB_HEIGHT, left: 0 }}>
+          <WorldCanvas
+            worldState={worldState}
+            factories={factories}
+            tool={tool}
+            selectedFactoryId={selectedWorldFactoryId}
+            onSelectFactory={setSelectedWorldFactoryId}
+            onEnterFactory={(factoryId) => {
+              handleFactorySwitch(factoryId)
+              setViewMode('factory')
+            }}
+            onViewportChange={(vp) => patchWorldState({ viewport: vp })}
+            pendingBusPoints={pendingBusPoint}
+            onBusPointPlace={(wx, wy) => {
+              if (!pendingBusPoint) {
+                setPendingBusPoint({ x1: wx, y1: wy })
+              } else {
+                // Second point: create the bus
+                const nb = busForm ?? {}
+                const newBus = {
+                  id:   (worldState?.nextWorldId ?? 1),
+                  item: nb.item ?? '',
+                  axis: nb.axis ?? 'h',
+                  x1:   pendingBusPoint.x1,
+                  y1:   pendingBusPoint.y1,
+                  x2:   wx,
+                  y2:   wy,
+                }
+                patchWorldState({
+                  buses:       [...(worldState?.buses ?? []), newBus],
+                  nextWorldId: (worldState?.nextWorldId ?? 1) + 1,
+                })
+                setPendingBusPoint(null)
+                setBusForm(null)
+              }
+            }}
+          />
+        </div>
+      )}
+
+      <div style={{ position: 'absolute', top: TOOLBAR_HEIGHT + FACTORY_TAB_HEIGHT, left: 0, display: viewMode === 'world' ? 'none' : 'block' }}>
         <ErrorBoundary onReset={handleNew}>
           <Stage
             ref={stageRef}
@@ -1817,10 +1872,45 @@ export default function App() {
         </ErrorBoundary>
       </div>
 
-      <CoordHUD position={viewport} scale={viewport.scale} stageWidth={dimensions.width} stageHeight={dimensions.height} />
-      <ZoomControls onZoom={handleZoomBtn} onReset={handleReset} />
+      {viewMode === 'factory' && (
+        <>
+          <CoordHUD position={viewport} scale={viewport.scale} stageWidth={dimensions.width} stageHeight={dimensions.height} />
+          <ZoomControls onZoom={handleZoomBtn} onReset={handleReset} />
+        </>
+      )}
 
-      <LayersPanel
+      {viewMode === 'world' ? (
+        <WorldPanel
+          factories={factories}
+          worldState={worldState}
+          selectedFactoryId={selectedWorldFactoryId}
+          onSelectFactory={setSelectedWorldFactoryId}
+          onEnterFactory={(factoryId) => {
+            handleFactorySwitch(factoryId)
+            setViewMode('factory')
+          }}
+          onPlaceFactory={(factoryId, x, y) => {
+            const already = (worldState?.worldFactories ?? []).some(wf => wf.factoryId === factoryId)
+            if (already) return
+            patchWorldState({
+              worldFactories: [...(worldState?.worldFactories ?? []), { factoryId, x, y, connectors: [] }],
+            })
+            setSelectedWorldFactoryId(factoryId)
+          }}
+          onAddBusStart={() => setBusForm({ open: true, item: '', axis: 'h' })}
+          onPatchWorldState={patchWorldState}
+          busForm={busForm}
+          onBusFormChange={(form) => {
+            if (!form) { setBusForm(null); setPendingBusPoint(null); return }
+            setBusForm(form)
+            // When confirmed, clear any pending point so user starts fresh clicks
+            if (form.confirmed && !busForm?.confirmed) {
+              setPendingBusPoint(null)
+            }
+          }}
+        />
+      ) : (
+        <LayersPanel
         layers={layers}
         selectedId={selectedId}
         onSelect={selectLayer}
@@ -1845,6 +1935,7 @@ export default function App() {
         itemByBelt={itemByBelt}
         belts={belts}
       />
+      )}
 
       <FloorInputModal
         open={floorInputModal.open}
