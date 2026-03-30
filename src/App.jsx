@@ -15,6 +15,8 @@ import { BUILDINGS_BY_KEY } from './buildings.js'
 import { RECIPES_BY_ID } from './recipes.js'
 import BeltObject from './BeltObject.jsx'
 import DEMO_STATE from './demo.js'
+import DEFAULT_WORKSPACE from './defaultWorkspace.json'
+import { discoverFactoryIO } from './worldUtils.js'
 import { ALL_BUILDINGS_BY_KEY, getPortWorldPos, findNearestInputPort, computeBeltGroup, simulateBeltFlow, computeAutoConnections } from './portUtils.js'
 import WorldCanvas from './WorldCanvas.jsx'
 import WorldPanel from './WorldPanel.jsx'
@@ -132,6 +134,11 @@ export default function App() {
   const midPanRef             = useRef(null)
   const viewportRef           = useRef(null)
   const draggingObjRef        = useRef(null)
+  const viewModeRef                = useRef('factory')
+  const selectedBusIdRef           = useRef(null)
+  const selectedBusConnectionIdRef = useRef(null)
+  const selectedWorldFactoryIdRef  = useRef(null)
+  const worldStateRef              = useRef(null)
   const lastRotateRef         = useRef(0)
   const selectedObjIdsRef     = useRef(new Set())
   const objectsRef            = useRef([])
@@ -187,9 +194,9 @@ export default function App() {
 
   const [viewMode, setViewMode] = useState('factory') // 'factory' | 'world'
   const [selectedWorldFactoryId, setSelectedWorldFactoryId] = useState(null)
-  // Bus creation state: null | { open, item, axis, confirmed, clickCount, x1, y1 }
-  const [busForm, setBusForm] = useState(null)
-  // Pending bus point (after first click): { x1, y1 }
+  const [selectedBusId, setSelectedBusId] = useState(null)
+  const [selectedBusConnectionId, setSelectedBusConnectionId] = useState(null)
+  // Pending bus point (after first click): { confirmed: true } | { x, y }
   const [pendingBusPoint, setPendingBusPoint] = useState(null)
 
   const stageW = () => window.innerWidth  - PANEL_WIDTH
@@ -242,6 +249,13 @@ export default function App() {
   beltsRef.current          = belts
   pendingBeltRef.current    = pendingBelt
   selectedIdRef.current     = selectedId
+
+  // World-view refs (avoids stale closures in the keydown handler)
+  viewModeRef.current                = viewMode
+  selectedBusIdRef.current           = selectedBusId
+  selectedBusConnectionIdRef.current = selectedBusConnectionId
+  selectedWorldFactoryIdRef.current  = selectedWorldFactoryId
+  worldStateRef.current              = worldState
 
   // Build a snapshot of the current active factory state
   const buildFactorySnapshot = useCallback(() => ({
@@ -391,6 +405,31 @@ export default function App() {
           saveHistoryRef.current()
           setBelts(prev => prev.filter(b => !ids.has(b.id)))
           setSelectedBeltIds(new Set())
+        }
+        // Delete selected items (world view)
+        if (viewModeRef.current === 'world') {
+          const ws = worldStateRef.current
+          if (selectedBusIdRef.current) {
+            const bid = selectedBusIdRef.current
+            patchWorldState({
+              buses: (ws?.buses ?? []).filter(b => b.id !== bid),
+              busConnections: (ws?.busConnections ?? []).filter(bc => bc.busId !== bid),
+            })
+            setSelectedBusId(null)
+          } else if (selectedBusConnectionIdRef.current) {
+            const bcid = selectedBusConnectionIdRef.current
+            patchWorldState({
+              busConnections: (ws?.busConnections ?? []).filter(bc => bc.id !== bcid),
+            })
+            setSelectedBusConnectionId(null)
+          } else if (selectedWorldFactoryIdRef.current) {
+            const fid = selectedWorldFactoryIdRef.current
+            patchWorldState({
+              worldFactories: (ws?.worldFactories ?? []).filter(wf => wf.factoryId !== fid),
+              busConnections: (ws?.busConnections ?? []).filter(bc => bc.factoryId !== fid),
+            })
+            setSelectedWorldFactoryId(null)
+          }
         }
       }
       if ((e.key === 'r' || e.key === 'R') &&
@@ -1320,18 +1359,19 @@ export default function App() {
   }, [applyFactorySnapshot, dimensions.width, dimensions.height, center])
 
   const handleLoadDemo = useCallback(() => {
+    const demo = DEFAULT_WORKSPACE.factories[0]
     applyFactorySnapshot({
-      objects:         DEMO_STATE.objects,
-      nextObjId:       DEMO_STATE.nextObjId,
-      belts:           DEMO_STATE.belts,
-      nextBeltId:      DEMO_STATE.nextBeltId,
-      layers:          DEMO_STATE.layers,
-      selectedLayerId: DEMO_STATE.selectedLayerId,
-      nextLayerId:     DEMO_STATE.nextLayerId,
-      nextFloorNum:    DEMO_STATE.nextFloorNum,
-      viewport:        DEMO_STATE.viewport,
+      objects:         demo.objects,
+      nextObjId:       demo.nextObjId,
+      belts:           demo.belts,
+      nextBeltId:      demo.nextBeltId,
+      layers:          demo.layers,
+      selectedLayerId: demo.selectedLayerId,
+      nextLayerId:     demo.nextLayerId,
+      nextFloorNum:    demo.nextFloorNum,
+      viewport:        demo.viewport,
     })
-    renameFactory(activeFactoryId, 'Demo')
+    renameFactory(activeFactoryId, demo.name)
   }, [applyFactorySnapshot, renameFactory, activeFactoryId])
 
   const handleLoad = useCallback(() => {
@@ -1619,11 +1659,13 @@ export default function App() {
         <FactoryTabBar
           factories={factories}
           activeFactoryId={activeFactoryId}
-          onSwitch={handleFactorySwitch}
-          onAdd={handleFactoryAdd}
+          onSwitch={(id) => { handleFactorySwitch(id); setViewMode('factory') }}
+          onAdd={() => { handleFactoryAdd(); setViewMode('factory') }}
           onRename={renameFactory}
           onDelete={handleFactoryDelete}
           onDuplicate={handleFactoryDuplicate}
+          viewMode={viewMode}
+          onViewModeChange={setViewMode}
         />
       </div>
 
@@ -1634,35 +1676,63 @@ export default function App() {
             factories={factories}
             tool={tool}
             selectedFactoryId={selectedWorldFactoryId}
-            onSelectFactory={setSelectedWorldFactoryId}
+            selectedBusId={selectedBusId}
+            selectedBusConnectionId={selectedBusConnectionId}
+            onSelectFactory={(id) => { setSelectedWorldFactoryId(id); if (id) setSelectedBusId(null); setSelectedBusConnectionId(null) }}
+            onSelectBus={(id) => { setSelectedBusId(id); if (id) setSelectedWorldFactoryId(null); setSelectedBusConnectionId(null) }}
+            onSelectBusConnection={(id) => { setSelectedBusConnectionId(id); setSelectedBusId(null); setSelectedWorldFactoryId(null) }}
             onEnterFactory={(factoryId) => {
               handleFactorySwitch(factoryId)
               setViewMode('factory')
             }}
+            onMoveFactory={(factoryId, x, y) => {
+              patchWorldState({
+                worldFactories: (worldState?.worldFactories ?? []).map(wf =>
+                  wf.factoryId === factoryId ? { ...wf, x, y } : wf
+                ),
+              })
+            }}
+            onMoveBus={(busId, x) => {
+              patchWorldState({
+                buses: (worldState?.buses ?? []).map(b => b.id === busId ? { ...b, x } : b),
+              })
+            }}
+            onResizeBus={(busId, { y1, y2 }) => {
+              patchWorldState({
+                buses: (worldState?.buses ?? []).map(b =>
+                  b.id === busId ? { ...b, ...(y1 !== undefined ? { y1 } : {}), ...(y2 !== undefined ? { y2 } : {}) } : b
+                ),
+              })
+            }}
             onViewportChange={(vp) => patchWorldState({ viewport: vp })}
             pendingBusPoints={pendingBusPoint}
             onBusPointPlace={(wx, wy) => {
-              if (!pendingBusPoint) {
-                setPendingBusPoint({ x1: wx, y1: wy })
+              if (!pendingBusPoint?.x) {
+                // First point — store x,y
+                const snap = 80 // WORLD_CELL_SIZE
+                setPendingBusPoint({ x: Math.round(wx / snap) * snap, y: wy })
               } else {
-                // Second point: create the bus
-                const nb = busForm ?? {}
+                // Second point — create vertical bus using x from first click
+                const snap = 80
                 const newBus = {
-                  id:   (worldState?.nextWorldId ?? 1),
-                  item: nb.item ?? '',
-                  axis: nb.axis ?? 'h',
-                  x1:   pendingBusPoint.x1,
-                  y1:   pendingBusPoint.y1,
-                  x2:   wx,
-                  y2:   wy,
+                  id: (worldState?.nextWorldId ?? 1),
+                  x:  pendingBusPoint.x,
+                  y1: Math.min(pendingBusPoint.y, wy),
+                  y2: Math.max(pendingBusPoint.y, wy),
                 }
                 patchWorldState({
                   buses:       [...(worldState?.buses ?? []), newBus],
                   nextWorldId: (worldState?.nextWorldId ?? 1) + 1,
                 })
                 setPendingBusPoint(null)
-                setBusForm(null)
               }
+            }}
+            onCreateBusConnection={(factoryId, connectorId, busId, y) => {
+              const nextId = worldState?.nextWorldId ?? 1
+              patchWorldState({
+                busConnections: [...(worldState?.busConnections ?? []), { id: nextId, busId, factoryId, connectorId, y }],
+                nextWorldId: nextId + 1,
+              })
             }}
           />
         </div>
@@ -1884,7 +1954,9 @@ export default function App() {
           factories={factories}
           worldState={worldState}
           selectedFactoryId={selectedWorldFactoryId}
-          onSelectFactory={setSelectedWorldFactoryId}
+          selectedBusId={selectedBusId}
+          onSelectFactory={(id) => { setSelectedWorldFactoryId(id); if (id) setSelectedBusId(null); setSelectedBusConnectionId(null) }}
+          onSelectBus={(id) => { setSelectedBusId(id); if (id) setSelectedWorldFactoryId(null); setSelectedBusConnectionId(null) }}
           onEnterFactory={(factoryId) => {
             handleFactorySwitch(factoryId)
             setViewMode('factory')
@@ -1892,21 +1964,39 @@ export default function App() {
           onPlaceFactory={(factoryId, x, y) => {
             const already = (worldState?.worldFactories ?? []).some(wf => wf.factoryId === factoryId)
             if (already) return
+            const factory = factories.find(f => f.id === factoryId)
+            const io = factory ? discoverFactoryIO(factory, RECIPES_BY_ID) : { inputs: [], outputs: [] }
+            let nextId = worldState?.nextWorldId ?? 1
+            const connectors = [
+              ...io.outputs.map((o, i) => ({ id: nextId++, side: 'east',  offset: i - Math.floor(io.outputs.length / 2), kind: 'belt', flow: 'out', item: o.item, perMin: o.perMin })),
+              ...io.inputs.map((inp, i) => ({ id: nextId++, side: 'west', offset: i - Math.floor(io.inputs.length  / 2), kind: 'belt', flow: 'in',  item: inp.item, perMin: inp.perMin })),
+            ]
             patchWorldState({
-              worldFactories: [...(worldState?.worldFactories ?? []), { factoryId, x, y, connectors: [] }],
+              worldFactories: [...(worldState?.worldFactories ?? []), { factoryId, x, y, connectors }],
+              nextWorldId: nextId,
             })
             setSelectedWorldFactoryId(factoryId)
           }}
-          onAddBusStart={() => setBusForm({ open: true, item: '', axis: 'h' })}
+          onAddBusStart={() => setPendingBusPoint({ confirmed: true })}
           onPatchWorldState={patchWorldState}
-          busForm={busForm}
-          onBusFormChange={(form) => {
-            if (!form) { setBusForm(null); setPendingBusPoint(null); return }
-            setBusForm(form)
-            // When confirmed, clear any pending point so user starts fresh clicks
-            if (form.confirmed && !busForm?.confirmed) {
-              setPendingBusPoint(null)
-            }
+          onRefreshIO={(factoryId) => {
+            const factory = factories.find(f => f.id === factoryId)
+            if (!factory) return
+            const io = discoverFactoryIO(factory, RECIPES_BY_ID)
+            let nextId = worldState?.nextWorldId ?? 1
+            const connectors = [
+              ...io.outputs.map((o, i) => ({ id: nextId++, side: 'east',  offset: i - Math.floor(io.outputs.length / 2), kind: 'belt', flow: 'out', item: o.item, perMin: o.perMin })),
+              ...io.inputs.map((inp, i) => ({ id: nextId++, side: 'west', offset: i - Math.floor(io.inputs.length  / 2), kind: 'belt', flow: 'in',  item: inp.item, perMin: inp.perMin })),
+            ]
+            const updatedWFs = (worldState?.worldFactories ?? []).map(wf =>
+              wf.factoryId === factoryId ? { ...wf, connectors } : wf
+            )
+            // Remove bus connections that referenced old connectors
+            const newConnIds = new Set(connectors.map(c => c.id))
+            const updatedBusConns = (worldState?.busConnections ?? []).filter(bc =>
+              bc.factoryId !== factoryId || newConnIds.has(bc.connectorId)
+            )
+            patchWorldState({ worldFactories: updatedWFs, busConnections: updatedBusConns, nextWorldId: nextId })
           }}
         />
       ) : (

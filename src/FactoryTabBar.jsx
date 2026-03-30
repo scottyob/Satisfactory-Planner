@@ -96,8 +96,9 @@ function FactoryTab({ factory, isActive, onSwitch, onRename, onDelete, canDelete
   )
 }
 
-export default function FactoryTabBar({ factories, activeFactoryId, onSwitch, onAdd, onRename, onDelete, onDuplicate }) {
+export default function FactoryTabBar({ factories, activeFactoryId, onSwitch, onAdd, onRename, onDelete, onDuplicate, viewMode, onViewModeChange }) {
   const canDelete = factories.length > 1
+  const worldActive = viewMode === 'world'
 
   return (
     <div style={{
@@ -110,7 +111,32 @@ export default function FactoryTabBar({ factories, activeFactoryId, onSwitch, on
       overflowX: 'auto', overflowY: 'hidden',
       zIndex: 10,
     }}>
-      {/* + New button */}
+      {/* World view tab — always first, never closeable */}
+      <div
+        onClick={() => onViewModeChange?.('world')}
+        title="World view — map of all factories"
+        style={{
+          display: 'flex', alignItems: 'center', gap: 5,
+          padding: '0 14px',
+          height: FACTORY_TAB_HEIGHT,
+          cursor: 'pointer',
+          background: worldActive ? ACTIVE_BG : 'transparent',
+          borderRight: `1px solid ${BORDER}`,
+          borderBottom: worldActive ? `2px solid ${ACCENT}` : '2px solid transparent',
+          flexShrink: 0,
+          userSelect: 'none',
+          color: worldActive ? TEXT : MUTED,
+          fontSize: 12,
+        }}
+      >
+        <span style={{ fontSize: 13, lineHeight: 1 }}>⊞</span>
+        <span>World</span>
+      </div>
+
+      {/* Divider between world tab and factory tabs */}
+      <div style={{ width: 1, background: BORDER, flexShrink: 0, alignSelf: 'stretch' }} />
+
+      {/* + New factory button */}
       <button
         onClick={onAdd}
         title="New factory"

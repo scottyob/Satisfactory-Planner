@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef } from 'react'
+import DEFAULT_WORKSPACE from './defaultWorkspace.json'
 
 const WORKSPACE_KEY = 'sp-workspace'
 
@@ -90,9 +91,10 @@ export function loadWorkspace() {
     }
   } catch {}
 
-  const factory = blankFactory(1)
-  _nextFactoryId = 2
-  return { version: 2, activeFactoryId: 1, factories: [factory] }
+  // No saved data — use the bundled default workspace
+  const maxId = DEFAULT_WORKSPACE.factories.reduce((m, f) => Math.max(m, f.id), 0)
+  _nextFactoryId = maxId + 1
+  return DEFAULT_WORKSPACE
 }
 
 const DEFAULT_WORLD_STATE = {
