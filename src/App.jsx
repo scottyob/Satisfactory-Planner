@@ -1,8 +1,10 @@
 import { useState, useCallback, useEffect, useRef, useMemo, Component } from 'react'
 import { Stage, Layer, Line, Rect, Group } from 'react-konva'
-import { CELL_SIZE, GRID_CELLS, GRID_PX, PANEL_WIDTH, TOOLBAR_HEIGHT, effectiveBeltTier } from './constants'
+import { CELL_SIZE, GRID_CELLS, GRID_PX, PANEL_WIDTH, TOOLBAR_HEIGHT, FACTORY_TAB_HEIGHT, effectiveBeltTier } from './constants'
 import Toolbar from './Toolbar.jsx'
 import LayersPanel, { useLayers, FOUNDATIONS_BY_KEY } from './LayersPanel.jsx'
+import useFactories from './useFactories.js'
+import FactoryTabBar from './FactoryTabBar.jsx'
 import BuildingObject from './BuildingObject.jsx'
 import FloorInputModal from './FloorInputModal.jsx'
 import RecipeModal from './RecipeModal.jsx'
@@ -55,48 +57,16 @@ function syncIdCounters(objects, belts) {
   if (_nextBeltId <= maxBelt) _nextBeltId = maxBelt + 1
 }
 
-const OBJ_KEY      = 'sp-objects'
-const VIEWPORT_KEY = 'sp-viewport'
-const BELTS_KEY    = 'sp-belts'
-
-function hasPersistedState() {
-  return !!(localStorage.getItem(OBJ_KEY) || localStorage.getItem(BELTS_KEY))
-}
-
-function loadObjects() {
+// Read the active factory snapshot from sp-workspace (migration already handled by useFactories)
+function loadInitialFactory() {
   try {
-    const saved = localStorage.getItem(OBJ_KEY)
+    const saved = localStorage.getItem('sp-workspace')
     if (saved) {
-      const parsed = JSON.parse(saved)
-      _nextObjId = parsed.nextObjId ?? _nextObjId
-      return parsed.objects ?? []
+      const ws = JSON.parse(saved)
+      return ws.factories?.find(f => f.id === ws.activeFactoryId) ?? ws.factories?.[0]
     }
   } catch {}
-  _nextObjId = DEMO_STATE.nextObjId
-  return DEMO_STATE.objects
-}
-
-function loadBelts() {
-  try {
-    const saved = localStorage.getItem(BELTS_KEY)
-    if (saved) {
-      const parsed = JSON.parse(saved)
-      _nextBeltId = parsed.nextBeltId ?? _nextBeltId
-      return parsed.belts ?? []
-    }
-  } catch {}
-  _nextBeltId = DEMO_STATE.nextBeltId
-  return DEMO_STATE.belts
-}
-
-function loadViewport(w, h) {
-  try {
-    const saved = localStorage.getItem(VIEWPORT_KEY)
-    if (saved) return JSON.parse(saved)
-  } catch {}
-  if (!hasPersistedState()) return DEMO_STATE.viewport
-  const center = Math.floor(GRID_CELLS / 2)
-  return { scale: 1, x: w / 2 - center * CELL_SIZE, y: h / 2 - center * CELL_SIZE }
+  return null
 }
 
 // ─── Grid ────────────────────────────────────────────────────────────────────
@@ -199,13 +169,28 @@ export default function App() {
   ])
   const [foundationOpacity, setFoundationOpacity] = useState(1.0)
 
+  // useFactories must be called first so it can migrate old localStorage keys before other state inits
+  const {
+    factories,
+    activeFactoryId,
+    addFactory,
+    removeFactory,
+    renameFactory,
+    setActiveFactory,
+    patchActiveFactory,
+  } = useFactories()
+
   const stageW = () => window.innerWidth  - PANEL_WIDTH
-  const stageH = () => window.innerHeight - TOOLBAR_HEIGHT
+  const stageH = () => window.innerHeight - TOOLBAR_HEIGHT - FACTORY_TAB_HEIGHT
 
   const [dimensions, setDimensions] = useState({ width: stageW(), height: stageH() })
 
   const center = Math.floor(GRID_CELLS / 2)
-  const [viewport, setViewport] = useState(() => loadViewport(stageW(), stageH()))
+  const [viewport, setViewport] = useState(() => {
+    const f = loadInitialFactory()
+    if (f?.viewport) return f.viewport
+    return { scale: 0.25, x: stageW() / 2 - center * CELL_SIZE * 0.25, y: stageH() / 2 - center * CELL_SIZE * 0.25 }
+  })
 
   const {
     layers, selectedId,
@@ -213,13 +198,22 @@ export default function App() {
     restoreLayerState, _nextLayerId, _nextFloorNum,
   } = useLayers()
 
-  const [objects, setObjects]               = useState(() => loadObjects())
-  const [belts, setBelts]                   = useState(() => loadBelts())
+  const [objects, setObjects] = useState(() => {
+    const f = loadInitialFactory()
+    if (f) { _nextObjId = f.nextObjId; return f.objects }
+    _nextObjId = DEMO_STATE.nextObjId
+    return DEMO_STATE.objects
+  })
+  const [belts, setBelts] = useState(() => {
+    const f = loadInitialFactory()
+    if (f) { _nextBeltId = f.nextBeltId; return f.belts }
+    _nextBeltId = DEMO_STATE.nextBeltId
+    return DEMO_STATE.belts
+  })
   const [selectedObjIds, setSelectedObjIds] = useState(new Set())
   const [selectedBeltIds, setSelectedBeltIds] = useState(new Set())
   const [pendingBelt, setPendingBelt]       = useState(null)
   const [marquee, setMarquee]               = useState(null)
-  const [fileName, setFileName]             = useState(null)
   const [floorInputModal,     setFloorInputModal]     = useState({ open: false, objId: null })
   const [recipeModal,         setRecipeModal]         = useState({ open: false, objId: null })
   const [splitterModal,       setSplitterModal]       = useState({ open: false, objId: null })
@@ -237,18 +231,25 @@ export default function App() {
   pendingBeltRef.current    = pendingBelt
   selectedIdRef.current     = selectedId
 
-  // Persist objects, belts, and viewport to localStorage
-  useEffect(() => {
-    localStorage.setItem(OBJ_KEY, JSON.stringify({ objects, nextObjId: _nextObjId }))
-  }, [objects])
+  // Build a snapshot of the current active factory state
+  const buildFactorySnapshot = useCallback(() => ({
+    id:              activeFactoryId,
+    name:            factories.find(f => f.id === activeFactoryId)?.name ?? 'Factory',
+    objects,
+    nextObjId:       _nextObjId,
+    belts,
+    nextBeltId:      _nextBeltId,
+    layers,
+    selectedLayerId: selectedId,
+    nextLayerId:     _nextLayerId(),
+    nextFloorNum:    _nextFloorNum(),
+    viewport,
+  }), [activeFactoryId, factories, objects, belts, layers, selectedId, viewport, _nextLayerId, _nextFloorNum])
 
+  // Consolidated autosave — persists to sp-workspace via useFactories
   useEffect(() => {
-    localStorage.setItem(BELTS_KEY, JSON.stringify({ belts, nextBeltId: _nextBeltId }))
-  }, [belts])
-
-  useEffect(() => {
-    localStorage.setItem(VIEWPORT_KEY, JSON.stringify(viewport))
-  }, [viewport])
+    patchActiveFactory(buildFactorySnapshot())
+  }, [objects, belts, layers, selectedId, viewport]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Resize
   useEffect(() => {
@@ -1228,42 +1229,57 @@ export default function App() {
 
   // ── Save / Load ───────────────────────────────────────────────────────────
 
+  // Apply a factory snapshot to current React state (used on load and factory switch)
+  const applyFactorySnapshot = useCallback((snapshot) => {
+    _nextObjId  = snapshot.nextObjId  ?? 1
+    _nextBeltId = snapshot.nextBeltId ?? 1
+    setObjects(snapshot.objects ?? [])
+    setBelts(snapshot.belts ?? [])
+    setSelectedObjIds(new Set())
+    setSelectedBeltIds(new Set())
+    setPendingBelt(null)
+    restoreLayerState(
+      snapshot.layers          ?? [{ id: 1, name: 'Floor 1', visible: true }],
+      snapshot.selectedLayerId ?? 1,
+      snapshot.nextLayerId     ?? 2,
+      snapshot.nextFloorNum    ?? 2,
+    )
+    if (snapshot.viewport) setViewport(snapshot.viewport)
+    historyRef.current = []
+  }, [restoreLayerState])
+
   const buildStateBlob = useCallback(() => {
+    // Build a version-2 workspace blob with all factories
+    const snapshot = buildFactorySnapshot()
+    const updatedFactories = factories.map(f => f.id === activeFactoryId ? snapshot : f)
     const state = {
-      version: 1,
-      objects,
-      nextObjId: _nextObjId,
-      belts,
-      nextBeltId: _nextBeltId,
-      layers,
-      selectedLayerId: selectedId,
-      nextLayerId: _nextLayerId(),
-      nextFloorNum: _nextFloorNum(),
-      viewport,
+      version: 2,
+      activeFactoryId,
+      factories: updatedFactories,
     }
     return new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' })
-  }, [objects, belts, layers, selectedId, viewport, _nextLayerId, _nextFloorNum])
+  }, [buildFactorySnapshot, factories, activeFactoryId])
+
+  const activeFactoryName = factories.find(f => f.id === activeFactoryId)?.name ?? 'Factory'
 
   const handleSaveAs = useCallback(async () => {
     const blob = buildStateBlob()
     try {
       const handle = await window.showSaveFilePicker({
-        suggestedName: fileName ?? 'factory.json',
+        suggestedName: 'workspace.json',
         types: [{ description: 'Factory JSON', accept: { 'application/json': ['.json'] } }],
       })
       fileHandleRef.current = handle
-      setFileName(handle.name)
       const writable = await handle.createWritable()
       await writable.write(blob)
       await writable.close()
     } catch (err) {
       if (err.name !== 'AbortError') console.error(err)
     }
-  }, [buildStateBlob, fileName])
+  }, [buildStateBlob])
 
   const handleSave = useCallback(async () => {
     if (fileHandleRef.current) {
-      // Overwrite the same file directly — no dialog
       try {
         const blob = buildStateBlob()
         const writable = await fileHandleRef.current.createWritable()
@@ -1280,38 +1296,30 @@ export default function App() {
   handleSaveRef.current = handleSave
 
   const handleNew = useCallback(() => {
-    _nextObjId  = 1
-    _nextBeltId = 1
-    setObjects([])
-    setBelts([])
-    setSelectedObjIds(new Set())
-    setSelectedBeltIds(new Set())
-    restoreLayerState(
-      [{ id: 1, name: 'Floor 1', visible: true }],
-      1, 2, 2,
-    )
-    setViewport({ scale: 1, x: dimensions.width / 2 - Math.floor(GRID_CELLS / 2) * CELL_SIZE, y: dimensions.height / 2 - Math.floor(GRID_CELLS / 2) * CELL_SIZE })
-    setFileName(null)
+    applyFactorySnapshot({
+      nextObjId: 1, nextBeltId: 1,
+      objects: [], belts: [],
+      layers: [{ id: 1, name: 'Floor 1', visible: true }],
+      selectedLayerId: 1, nextLayerId: 2, nextFloorNum: 2,
+      viewport: { scale: 0.25, x: dimensions.width / 2 - center * CELL_SIZE * 0.25, y: dimensions.height / 2 - center * CELL_SIZE * 0.25 },
+    })
     fileHandleRef.current = null
-  }, [dimensions.width, dimensions.height])
+  }, [applyFactorySnapshot, dimensions.width, dimensions.height, center])
 
   const handleLoadDemo = useCallback(() => {
-    const state = DEMO_STATE
-    _nextObjId  = state.nextObjId
-    _nextBeltId = state.nextBeltId
-    setObjects(state.objects)
-    setBelts(state.belts)
-    setSelectedObjIds(new Set())
-    setSelectedBeltIds(new Set())
-    restoreLayerState(
-      state.layers,
-      state.selectedLayerId,
-      state.nextLayerId,
-      state.nextFloorNum,
-    )
-    setViewport(state.viewport)
-    setFileName('Demo')
-  }, [restoreLayerState])
+    applyFactorySnapshot({
+      objects:         DEMO_STATE.objects,
+      nextObjId:       DEMO_STATE.nextObjId,
+      belts:           DEMO_STATE.belts,
+      nextBeltId:      DEMO_STATE.nextBeltId,
+      layers:          DEMO_STATE.layers,
+      selectedLayerId: DEMO_STATE.selectedLayerId,
+      nextLayerId:     DEMO_STATE.nextLayerId,
+      nextFloorNum:    DEMO_STATE.nextFloorNum,
+      viewport:        DEMO_STATE.viewport,
+    })
+    renameFactory(activeFactoryId, 'Demo')
+  }, [applyFactorySnapshot, renameFactory, activeFactoryId])
 
   const handleLoad = useCallback(() => {
     const input    = document.createElement('input')
@@ -1323,21 +1331,18 @@ export default function App() {
       const reader = new FileReader()
       reader.onload = (ev) => {
         try {
-          const state = JSON.parse(ev.target.result)
-          _nextObjId  = state.nextObjId  ?? _nextObjId
-          _nextBeltId = state.nextBeltId ?? _nextBeltId
-          setObjects(state.objects ?? [])
-          setBelts(state.belts ?? [])
-          setSelectedObjIds(new Set())
-          setSelectedBeltIds(new Set())
-          restoreLayerState(
-            state.layers ?? [{ id: 1, name: 'Floor 1', visible: true }],
-            state.selectedLayerId ?? 1,
-            state.nextLayerId ?? 2,
-            state.nextFloorNum ?? 2,
-          )
-          if (state.viewport) setViewport(state.viewport)
-          setFileName(file.name)
+          let state = JSON.parse(ev.target.result)
+          // Migrate version 1 (single-factory) files
+          if (!state.factories) {
+            state = {
+              version: 2,
+              activeFactoryId: 1,
+              factories: [{ id: 1, name: file.name.replace(/\.json$/, ''), ...state }],
+            }
+          }
+          const factory = state.factories.find(f => f.id === state.activeFactoryId) ?? state.factories[0]
+          if (factory) applyFactorySnapshot(factory)
+          fileHandleRef.current = null
         } catch (err) {
           console.error('Failed to load file, starting fresh:', err)
           handleNew()
@@ -1346,7 +1351,49 @@ export default function App() {
       reader.readAsText(file)
     }
     input.click()
-  }, [restoreLayerState, handleNew])
+  }, [applyFactorySnapshot, handleNew])
+
+  // ── Factory switching ─────────────────────────────────────────────────────
+
+  const handleFactorySwitch = useCallback((id) => {
+    if (id === activeFactoryId) return
+    patchActiveFactory(buildFactorySnapshot())
+    const target = factories.find(f => f.id === id)
+    if (!target) return
+    setActiveFactory(id)
+    applyFactorySnapshot(target)
+  }, [activeFactoryId, patchActiveFactory, buildFactorySnapshot, factories, setActiveFactory, applyFactorySnapshot])
+
+  const handleFactoryAdd = useCallback(() => {
+    patchActiveFactory(buildFactorySnapshot())
+    const newFactory = addFactory()
+    applyFactorySnapshot(newFactory)
+  }, [patchActiveFactory, buildFactorySnapshot, addFactory, applyFactorySnapshot])
+
+  const handleFactoryDelete = useCallback((id) => {
+    if (factories.length <= 1) return
+    if (id === activeFactoryId) {
+      // Switch to a neighbour first
+      const idx = factories.findIndex(f => f.id === id)
+      const remaining = factories.filter(f => f.id !== id)
+      const newActive = remaining[Math.min(idx, remaining.length - 1)]
+      setActiveFactory(newActive.id)
+      applyFactorySnapshot(newActive)
+      removeFactory(id, newActive.id)
+    } else {
+      removeFactory(id, activeFactoryId)
+    }
+  }, [factories, activeFactoryId, setActiveFactory, applyFactorySnapshot, removeFactory])
+
+  const handleFactoryDuplicate = useCallback((id) => {
+    patchActiveFactory(buildFactorySnapshot())
+    const source = factories.find(f => f.id === id)
+    if (!source) return
+    const clone = JSON.parse(JSON.stringify(source))
+    clone.name = `${source.name} (copy)`
+    const newFactory = addFactory(clone)
+    applyFactorySnapshot({ ...clone, id: newFactory.id })
+  }, [patchActiveFactory, buildFactorySnapshot, factories, addFactory, applyFactorySnapshot])
 
   // ── Flow simulation ───────────────────────────────────────────────────────
 
@@ -1550,11 +1597,23 @@ export default function App() {
         onViewToggle={(id) => setViewOptions(prev => prev.map(o => o.id === id ? { ...o, visible: !o.visible } : o))}
         foundationOpacity={foundationOpacity}
         onFoundationOpacityChange={setFoundationOpacity}
-        fileName={fileName} onRename={setFileName}
+        fileName={activeFactoryName} onRename={(name) => renameFactory(activeFactoryId, name)}
         onSave={handleSave} onSaveAs={handleSaveAs} onLoad={handleLoad} onNew={handleNew} onLoadDemo={handleLoadDemo}
       />
 
-      <div style={{ position: 'absolute', top: TOOLBAR_HEIGHT, left: 0 }}>
+      <div style={{ position: 'absolute', top: TOOLBAR_HEIGHT, left: 0, width: `calc(100vw - ${PANEL_WIDTH}px)` }}>
+        <FactoryTabBar
+          factories={factories}
+          activeFactoryId={activeFactoryId}
+          onSwitch={handleFactorySwitch}
+          onAdd={handleFactoryAdd}
+          onRename={renameFactory}
+          onDelete={handleFactoryDelete}
+          onDuplicate={handleFactoryDuplicate}
+        />
+      </div>
+
+      <div style={{ position: 'absolute', top: TOOLBAR_HEIGHT + FACTORY_TAB_HEIGHT, left: 0 }}>
         <ErrorBoundary onReset={handleNew}>
           <Stage
             ref={stageRef}

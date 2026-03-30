@@ -98,19 +98,19 @@ export { floorTextureUrl }
 let _nextLayerId  = 2
 let _nextFloorNum = 2
 
-const LAYER_KEY = 'sp-layers'
-
 function loadLayerState() {
   try {
-    const saved = localStorage.getItem(LAYER_KEY)
+    const saved = localStorage.getItem('sp-workspace')
     if (saved) {
-      const parsed = JSON.parse(saved)
-      const layers = parsed.layers ?? []
-      // Guard: nextLayerId must exceed all existing layer IDs (mirrors syncIdCounters for objects)
-      const maxId = layers.reduce((m, l) => Math.max(m, l.id), 0)
-      _nextLayerId  = Math.max(parsed.nextLayerId  ?? _nextLayerId,  maxId + 1)
-      _nextFloorNum = parsed.nextFloorNum ?? _nextFloorNum
-      return { layers, selectedId: parsed.selectedId }
+      const ws = JSON.parse(saved)
+      const f  = ws.factories?.find(f => f.id === ws.activeFactoryId) ?? ws.factories?.[0]
+      if (f) {
+        const layers = f.layers ?? []
+        const maxId  = layers.reduce((m, l) => Math.max(m, l.id), 0)
+        _nextLayerId  = Math.max(f.nextLayerId  ?? _nextLayerId,  maxId + 1)
+        _nextFloorNum = f.nextFloorNum ?? _nextFloorNum
+        return { layers, selectedId: f.selectedLayerId }
+      }
     }
   } catch {}
   return null
@@ -122,12 +122,6 @@ export function useLayers() {
     { id: 1, name: 'Floor 1', visible: true },
   ])
   const [selectedId, setSelectedId] = useState(initial?.selectedId ?? 1)
-
-  useEffect(() => {
-    localStorage.setItem(LAYER_KEY, JSON.stringify({
-      layers, selectedId, nextLayerId: _nextLayerId, nextFloorNum: _nextFloorNum,
-    }))
-  }, [layers, selectedId])
 
   const addLayer = () => {
     const id  = _nextLayerId++

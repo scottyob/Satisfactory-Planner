@@ -279,7 +279,7 @@ function EditableTitle({ fileName, onRename }) {
   const inputRef              = useRef(null)
 
   const start = () => {
-    setDraft(fileName ?? 'factory.json')
+    setDraft(fileName ?? 'Factory')
     setEditing(true)
   }
 
@@ -288,8 +288,8 @@ function EditableTitle({ fileName, onRename }) {
   }, [editing])
 
   const commit = () => {
-    const name = draft.trim() || (fileName ?? 'factory.json')
-    onRename(name.endsWith('.json') ? name : name + '.json')
+    const name = draft.trim() || (fileName ?? 'Factory')
+    onRename(name)
     setEditing(false)
   }
 
@@ -328,7 +328,7 @@ function EditableTitle({ fileName, onRename }) {
       onDoubleClick={start}
       title="Double-click to rename"
     >
-      {fileName ?? 'SATISFACTORY PLANNER'}
+      {fileName ?? 'Factory'}
     </span>
   )
 }
